@@ -1,0 +1,51 @@
+# Node.js
+node_modules/
+dist/
+build/
+.env
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+.vscode/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs and editors
+.idea/
+.vscode/
+
+# Misc
+.env
+
+# Dependencies
+package-lock.json
+*.tgz
+
+# Testing
+/coverage
+/.nyc_output
+/test-results.xml
+
+# Production
+npm-shrinkwrap.json
+
+# Optional: if you have a "build" or "dist" directory for compiled output
+/dist
+/build
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+*.sublime-project
+*.sublime-workspace
