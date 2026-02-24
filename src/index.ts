@@ -43,6 +43,11 @@ const startServer = async () => {
     app.use('/api/currency', currencyRoutes);
     app.use('/api/scanned-transactions', scannedTransactionRoutes);
 
+    // Root route
+    app.get('/', (_req: Request, res: Response) => {
+      res.status(200).send('OpsFlow API is running. Direct access is via /api endpoints.');
+    });
+
     // Health check
     app.get('/api/health', (_req: Request, res: Response) => {
       res.status(200).json({
