@@ -48,6 +48,7 @@ export const registerUser = async (req: Request, res: Response) => {
       email: newUser.email,
       role: newUser.role,
       businessId: newUser.businessId,
+      businessName: newBusiness.name,
       token: generateToken(newUser._id),
     });
   } catch (error) {
@@ -65,12 +66,14 @@ export const loginUser = async (req: Request, res: Response) => {
     const user = await User.findOne({ email });
 
     if (user && (await bcrypt.compare(password, user.password))) {
+      const business = await Business.findById(user.businessId);
       res.json({
         _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         businessId: user.businessId,
+        businessName: business?.name,
         token: generateToken(user._id),
       });
     } else {

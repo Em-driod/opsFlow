@@ -16,6 +16,7 @@ export interface IInvoice extends Document {
   status: 'draft' | 'sent' | 'paid' | 'overdue';
   dueDate: Date;
   notes?: string;
+  transactionId?: mongoose.Types.ObjectId;
 }
 
 const LineItemSchema: Schema = new Schema({
@@ -37,6 +38,7 @@ const InvoiceSchema: Schema = new Schema(
     status: { type: String, enum: ['draft', 'sent', 'paid', 'overdue'], default: 'draft' },
     dueDate: { type: Date, required: true },
     notes: { type: String },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
   },
   { timestamps: true },
 );

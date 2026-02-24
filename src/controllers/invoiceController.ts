@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import Invoice from '../models/Invoice.js';
+import Transaction from '../models/Transaction.js';
 import { createNotification } from './notificationController.js';
 import Tesseract from 'tesseract.js';
 
@@ -182,7 +183,7 @@ export const scanInvoice = async (req: Request, res: Response) => {
  */
 export const createInvoice = async (req: Request, res: Response) => {
   try {
-    const { clientId, lineItems, dueDate, tax, notes } = req.body;
+    const { clientId, lineItems, dueDate, tax, notes, recordAsIncome } = req.body;
     const user = req.user as any;
 
     const subtotal = lineItems.reduce((acc: number, item: any) => acc + item.total, 0);
@@ -198,15 +199,29 @@ export const createInvoice = async (req: Request, res: Response) => {
       total,
       dueDate,
       notes,
-      status: 'draft',
     });
+
+    if (recordAsIncome) {
+      const incomeTransaction = await Transaction.create({
+        clientId,
+        businessId: user.businessId,
+        amount: total,
+        type: 'income',
+        category: 'Sales',
+        description: `Payment for Invoice #${invoice.invoiceNumber}`,
+        recordedBy: user._id,
+      });
+
+      invoice.transactionId = incomeTransaction._id as any;
+      invoice.status = 'paid';
+    }
 
     const createdInvoice = await invoice.save();
 
     await createNotification({
       businessId: user.businessId,
       userId: user._id,
-      message: `New invoice #${createdInvoice.invoiceNumber} created for a total of ${total}.`,
+      message: `New invoice #${createdInvoice.invoiceNumber} created for a total of ${total}.${recordAsIncome ? ' Recorded as income.' : ''}`,
       link: `/invoices/${createdInvoice._id}`,
     });
 
