@@ -11,6 +11,7 @@ export interface IScannedTransaction extends Document {
     type: 'income' | 'expense' | 'unassigned';
     category: string;
     description?: string;
+    status: 'pending' | 'committed' | 'edited';
   }>;
 }
 

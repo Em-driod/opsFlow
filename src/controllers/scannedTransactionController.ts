@@ -23,12 +23,12 @@ export const createScannedTransaction = async (req: Request, res: Response) => {
       status: 'pending',
       parsedDetails: transactions || [], // Save the array of parsed items
     });
-    
+
     await createNotification({
-        businessId: user.businessId,
-        userId: user._id,
-        message: `Successfully saved a new scanned document for review.`,
-        link: `/scanned-transactions`,
+      businessId: user.businessId,
+      userId: user._id,
+      message: `Successfully saved a new scanned document for review.`,
+      link: `/scanned-transactions`,
     });
 
     res.status(201).json(scannedTx);
@@ -59,58 +59,61 @@ export const getScannedTransactions = async (req: Request, res: Response) => {
 // @route   POST /api/scanned-transactions/:id/commit
 // @access  Private
 export const commitScannedTransaction = async (req: Request, res: Response) => {
-    try {
-        const user = req.user as any;
-        const scannedTxId = req.params.id;
-        const { amount, type, category, description, clientId, itemIndex } = req.body; // Expect itemIndex
+  try {
+    const user = req.user as any;
+    const scannedTxId = req.params.id as string;
+    const { amount, type, category, description, clientId, itemIndex } = req.body; // Expect itemIndex
 
-        const scannedTx = await ScannedTransaction.findOne({ _id: scannedTxId, businessId: user.businessId });
+    const scannedTx = await ScannedTransaction.findOne({ _id: scannedTxId, businessId: user.businessId });
 
-        if (!scannedTx) {
-            return res.status(404).json({ message: 'Scanned transaction not found.' });
-        }
-
-        // Check if the specific parsed item has already been committed
-        if (scannedTx.parsedDetails[itemIndex]?.status === 'committed') {
-            return res.status(400).json({ message: 'This item has already been committed.' });
-        }
-
-        const transaction = await Transaction.create({
-            businessId: user.businessId,
-            clientId: clientId || undefined,
-            amount,
-            type,
-            category,
-            description,
-            recordedBy: user._id,
-        });
-
-        // Update the status of the specific parsed item
-        if (scannedTx.parsedDetails[itemIndex]) {
-            scannedTx.parsedDetails[itemIndex].status = 'committed';
-        }
-        
-        // Check if all parsed items are committed, if so, mark the entire scannedTx as processed
-        const allItemsCommitted = scannedTx.parsedDetails.every(item => item.status === 'committed');
-        if (allItemsCommitted) {
-            scannedTx.status = 'processed';
-        }
-
-        await scannedTx.save();
-
-        await createNotification({
-            businessId: user.businessId,
-            userId: user._id,
-            message: `A scanned document item has been approved and a new ${type} transaction of ${amount} was created.`,
-            link: `/transactions`,
-        });
-
-        res.status(201).json({ message: 'Transaction committed successfully.', transaction });
-
-    } catch (error) {
-        res.status(500).json({ message: 'Error committing transaction', error: (error as Error).message });
-        console.error('Error committing scanned transaction:', error);
+    if (!scannedTx) {
+      return res.status(404).json({ message: 'Scanned transaction not found.' });
     }
+
+    // Check if the specific parsed item has already been committed
+    const selectedItem = scannedTx.parsedDetails[itemIndex];
+    if (!selectedItem) {
+      return res.status(404).json({ message: 'Item not found in scanned data.' });
+    }
+
+    if (selectedItem.status === 'committed') {
+      return res.status(400).json({ message: 'This item has already been committed.' });
+    }
+
+    const transaction = await Transaction.create({
+      businessId: user.businessId,
+      clientId: clientId || undefined,
+      amount: amount,
+      type: type,
+      category: category,
+      description: description,
+      recordedBy: user._id,
+    });
+
+    // Update the status of the specific parsed item
+    selectedItem.status = 'committed';
+
+    // Check if all parsed items are committed, if so, mark the entire scannedTx as processed
+    const allItemsCommitted = scannedTx.parsedDetails.every(item => item.status === 'committed');
+    if (allItemsCommitted) {
+      scannedTx.status = 'processed';
+    }
+
+    await scannedTx.save();
+
+    await createNotification({
+      businessId: user.businessId,
+      userId: user._id,
+      message: `A scanned document item has been approved and a new ${type} transaction of ${amount} was created.`,
+      link: `/transactions`,
+    });
+
+    res.status(201).json({ message: 'Transaction committed successfully.', transaction });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Error committing transaction', error: (error as Error).message });
+    console.error('Error committing scanned transaction:', error);
+  }
 };
 
 // @desc    Update a specific parsed item within a scanned transaction
@@ -119,8 +122,8 @@ export const commitScannedTransaction = async (req: Request, res: Response) => {
 export const updateParsedScanItem = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
-    const scannedTxId = req.params.id;
-    const itemIndex = parseInt(req.params.itemIndex);
+    const scannedTxId = req.params.id as string;
+    const itemIndex = parseInt(req.params.itemIndex as string);
     const updatedItemData = req.body;
 
     const scannedTx = await ScannedTransaction.findOne({ _id: scannedTxId, businessId: user.businessId });
@@ -134,11 +137,14 @@ export const updateParsedScanItem = async (req: Request, res: Response) => {
     }
 
     // Update the specific item
-    scannedTx.parsedDetails[itemIndex] = {
-      ...scannedTx.parsedDetails[itemIndex],
-      ...updatedItemData,
-      status: 'edited', // Mark as edited
-    };
+    const existingItem = scannedTx.parsedDetails[itemIndex];
+    if (existingItem) {
+      scannedTx.parsedDetails[itemIndex] = {
+        ...existingItem,
+        ...updatedItemData,
+        status: 'edited', // Mark as edited
+      };
+    }
 
     const updatedScannedTx = await scannedTx.save();
     res.json(updatedScannedTx.parsedDetails[itemIndex]);
@@ -155,7 +161,7 @@ export const updateParsedScanItem = async (req: Request, res: Response) => {
 export const commitAllScannedItems = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
-    const scannedTxId = req.params.id;
+    const scannedTxId = req.params.id as string;
 
     const scannedTx = await ScannedTransaction.findOne({ _id: scannedTxId, businessId: user.businessId });
 
@@ -169,8 +175,8 @@ export const commitAllScannedItems = async (req: Request, res: Response) => {
     for (let i = 0; i < scannedTx.parsedDetails.length; i++) {
       const item = scannedTx.parsedDetails[i];
 
-      // Only commit if the item is pending or has been edited
-      if (item.status === 'pending' || item.status === 'edited') {
+      // Only commit if the item exists and is pending or has been edited
+      if (item && (item.status === 'pending' || item.status === 'edited')) {
         const transaction = await Transaction.create({
           businessId: user.businessId,
           amount: item.amount,
@@ -180,7 +186,7 @@ export const commitAllScannedItems = async (req: Request, res: Response) => {
           recordedBy: user._id,
         });
         committedTransactions.push(transaction);
-        scannedTx.parsedDetails[i].status = 'committed'; // Mark as committed
+        item.status = 'committed'; // Mark as committed
         committedCount++;
       }
     }
@@ -215,7 +221,7 @@ export const deleteScannedTransaction = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
     const scannedTx = await ScannedTransaction.findOne({
-      _id: req.params.id,
+      _id: req.params.id as string,
       businessId: user.businessId,
     });
 

@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import Transaction from '../models/Transaction.js';
+import Client from '../models/Client.js';
 import mongoose from 'mongoose';
 
 /**
@@ -117,14 +118,14 @@ export const getFinancialSummary = async (req: Request, res: Response) => {
       summary.length > 0
         ? summary
         : [
-            {
-              _id: groupBy === 'category' ? 'Overall' : null,
-              totalIncome: 0,
-              totalExpenses: 0,
-              netProfit: 0,
-              totalTransactions: 0,
-            },
-          ];
+          {
+            _id: groupBy === 'category' ? 'Overall' : null,
+            totalIncome: 0,
+            totalExpenses: 0,
+            netProfit: 0,
+            totalTransactions: 0,
+          },
+        ];
 
     res.status(200).json(report);
   } catch (error) {
@@ -156,7 +157,7 @@ export const getDetailedTransactions = async (req: Request, res: Response) => {
     });
 
     if (groupBy === 'client') {
-      transactionsQuery = transactionsQuery.populate('clientId', 'name');
+      transactionsQuery = (transactionsQuery as any).populate('clientId', 'name');
     }
 
     const transactions = await transactionsQuery.sort({ date: 1 });
