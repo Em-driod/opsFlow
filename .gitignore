@@ -27,7 +27,6 @@ yarn-error.log*
 .env
 
 # Dependencies
-package-lock.json
 *.tgz
 
 # Testing
