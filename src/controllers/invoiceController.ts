@@ -183,15 +183,25 @@ export const scanInvoice = async (req: Request, res: Response) => {
  */
 export const createInvoice = async (req: Request, res: Response) => {
   try {
-    const { clientId, lineItems, dueDate, tax, notes, recordAsIncome } = req.body;
+    const { clientId, customClientName, lineItems, dueDate, tax, notes, recordAsIncome } = req.body;
     const user = req.user as any;
+
+    // Validate that either clientId or customClientName is provided
+    if (!clientId && !customClientName) {
+      return res.status(400).json({ message: 'Either clientId or customClientName is required' });
+    }
+
+    if (clientId && customClientName) {
+      return res.status(400).json({ message: 'Cannot provide both clientId and customClientName' });
+    }
 
     const subtotal = lineItems.reduce((acc: number, item: any) => acc + item.total, 0);
     const total = subtotal + subtotal * (tax / 100);
 
     const invoice = new Invoice({
       businessId: user.businessId,
-      clientId,
+      clientId: clientId || null,
+      customClientName: customClientName || null,
       invoiceNumber: await generateInvoiceNumber(),
       lineItems,
       subtotal,
@@ -203,12 +213,12 @@ export const createInvoice = async (req: Request, res: Response) => {
 
     if (recordAsIncome) {
       const incomeTransaction = await Transaction.create({
-        clientId,
+        clientId: clientId || null,
         businessId: user.businessId,
         amount: total,
         type: 'income',
         category: 'Sales',
-        description: `Payment for Invoice #${invoice.invoiceNumber}`,
+        description: `Payment for Invoice #${invoice.invoiceNumber}${customClientName ? ` (${customClientName})` : ''}`,
         recordedBy: user._id,
       });
 

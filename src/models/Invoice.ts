@@ -3,7 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IInvoice extends Document {
   invoiceNumber: string;
   businessId: mongoose.Types.ObjectId;
-  clientId: mongoose.Types.ObjectId;
+  clientId?: mongoose.Types.ObjectId | null;
+  customClientName?: string | null;
   lineItems: {
     description: string;
     quantity: number;
@@ -30,7 +31,8 @@ const InvoiceSchema: Schema = new Schema(
   {
     invoiceNumber: { type: String, required: true, unique: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
-    clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
+    clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
+    customClientName: { type: String, default: null },
     lineItems: [LineItemSchema],
     subtotal: { type: Number, required: true },
     tax: { type: Number, default: 0 },
