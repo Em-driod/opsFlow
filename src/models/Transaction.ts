@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITransaction extends Document {
   clientId?: mongoose.Types.ObjectId; // Keep clientId optional
+  businessId: mongoose.Types.ObjectId;
   amount: number;
   type: 'income' | 'expense';
   category: string;
@@ -12,7 +13,7 @@ export interface ITransaction extends Document {
 const TransactionSchema: Schema = new Schema(
   {
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: false },
-    businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: false }, // Make businessId optional
+    businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
     amount: { type: Number, required: true },
     type: { type: String, enum: ['income', 'expense'], required: true },
     category: { type: String },
