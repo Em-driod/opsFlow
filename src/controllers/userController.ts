@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import User from '../models/User.js';
 import Business from '../models/Business.js';
+import { logActivity } from '../utils/activityLogger.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
@@ -123,6 +124,19 @@ export const createStaffUser = async (req: Request, res: Response) => {
 
     const savedUser = await newUser.save();
 
+    // Log the activity
+    await logActivity({
+      req,
+      action: 'CREATE',
+      resource: 'USER',
+      resourceId: savedUser._id.toString(),
+      details: {
+        createdUserName: name,
+        createdUserEmail: email,
+        createdUserRole: role || 'staff'
+      }
+    });
+
     res.status(201).json({
       _id: savedUser._id,
       name: savedUser.name,
@@ -185,6 +199,22 @@ export const updateUser = async (req: Request, res: Response) => {
 
       const updatedUser = await user.save();
 
+      // Log the activity
+      await logActivity({
+        req,
+        action: 'UPDATE',
+        resource: 'USER',
+        resourceId: updatedUser._id.toString(),
+        details: {
+          updatedFields: {
+            name: req.body.name || user.name,
+            email: req.body.email || user.email,
+            role: req.body.role || user.role,
+            passwordChanged: !!req.body.password
+          }
+        }
+      });
+
       res.json({
         _id: updatedUser._id,
         name: updatedUser.name,
@@ -208,6 +238,20 @@ export const deleteUser = async (req: Request, res: Response) => {
     const user = await User.findById(req.params.id);
     if (user) {
       await user.deleteOne();
+
+      // Log the activity
+      await logActivity({
+        req,
+        action: 'DELETE',
+        resource: 'USER',
+        resourceId: user._id.toString(),
+        details: {
+          deletedUserName: user.name,
+          deletedUserEmail: user.email,
+          deletedUserRole: user.role
+        }
+      });
+
       res.json({ message: 'User removed' });
     } else {
       res.status(404).json({ message: 'User not found' });

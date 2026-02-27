@@ -18,6 +18,7 @@ import reportingRoutes from './routes/reportingRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import currencyRoutes from './routes/currencyRoutes.js';
 import scannedTransactionRoutes from './routes/scannedTransactionRoutes.js';
+import activityRoutes from './routes/activityRoutes.js';
 
 const startServer = async () => {
   try {
@@ -42,6 +43,7 @@ const startServer = async () => {
     app.use('/api/invoices', invoiceRoutes);
     app.use('/api/currency', currencyRoutes);
     app.use('/api/scanned-transactions', scannedTransactionRoutes);
+    app.use('/api/activity', activityRoutes);
 
     // Root route
     app.get('/', (_req: Request, res: Response) => {
