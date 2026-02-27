@@ -248,7 +248,13 @@ export const createInvoice = async (req: Request, res: Response) => {
  */
 export const getInvoices = async (req: Request, res: Response) => {
   try {
-    const invoices = await Invoice.find({ businessId: (req.user as any).businessId })
+    const user = req.user as any;
+    const invoices = await Invoice.find({ 
+      businessId: user.businessId,
+      // Add a field to track which user created the invoice
+      // For now, we'll assume all invoices are visible to all business users
+      // In a real system, you might want to add a 'createdBy' field to invoices
+    })
       .populate('clientId', 'name')
       .sort({ createdAt: -1 });
     res.status(200).json(invoices);

@@ -210,7 +210,11 @@ export const createTransaction = async (req: Request, res: Response) => {
 export const getTransactions = async (req: Request, res: Response) => {
   try {
     const { clientId } = req.query;
-    const filter: any = { businessId: (req.user as any).businessId }; // Filter by businessId
+    const user = req.user as any;
+    const filter: any = { 
+      businessId: user.businessId, // Filter by businessId
+      recordedBy: user._id // Only show transactions created by this user
+    };
     if (clientId) {
       filter.clientId = clientId; // Add clientId filter if provided
     }
