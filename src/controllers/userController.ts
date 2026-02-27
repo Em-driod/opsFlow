@@ -91,7 +91,13 @@ export const createStaffUser = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role, businessId } = req.body;
 
-    if (!req.user?.businessId || req.user.businessId !== businessId) {
+    // Verify the user is admin and businessId matches
+    if (!req.user?.businessId || req.user.role !== 'admin') {
+      return res.status(401).json({ message: 'Not authorized - admin access required' });
+    }
+
+    // Compare businessId as strings since frontend sends it as string
+    if (req.user.businessId.toString() !== businessId) {
       return res.status(401).json({ message: 'Not authorized to create users for this business' });
     }
 
@@ -112,7 +118,7 @@ export const createStaffUser = async (req: Request, res: Response) => {
       email,
       password: hashedPassword,
       role: role || 'staff',
-      businessId,
+      businessId: req.user.businessId, // Use the authenticated user's businessId
     });
 
     const savedUser = await newUser.save();
