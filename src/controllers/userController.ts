@@ -84,6 +84,52 @@ export const loginUser = async (req: Request, res: Response) => {
   }
 };
 
+// @desc    Create a staff user for existing business
+// @route   POST /api/users/staff
+// @access  Private/Admin
+export const createStaffUser = async (req: Request, res: Response) => {
+  try {
+    const { name, email, password, role, businessId } = req.body;
+
+    if (!req.user?.businessId || req.user.businessId !== businessId) {
+      return res.status(401).json({ message: 'Not authorized to create users for this business' });
+    }
+
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: 'User with that email already exists' });
+    }
+
+    if (!password) {
+      return res.status(400).json({ message: 'Password is required' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = new User({
+      name,
+      email,
+      password: hashedPassword,
+      role: role || 'staff',
+      businessId,
+    });
+
+    const savedUser = await newUser.save();
+
+    res.status(201).json({
+      _id: savedUser._id,
+      name: savedUser.name,
+      email: savedUser.email,
+      role: savedUser.role,
+      businessId: savedUser.businessId,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: (error as Error).message });
+  }
+};
+
 // @desc    Get all users for a business
 // @route   GET /api/users
 // @access  Private/Admin
