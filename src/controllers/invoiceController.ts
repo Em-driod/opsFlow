@@ -3,6 +3,8 @@ import Invoice from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 import { createNotification } from './notificationController.js';
 import Tesseract from 'tesseract.js';
+import { enqueue } from '../services/exportQueueService.js';
+import { fire } from '../services/webhookService.js';
 
 // Helper: Extract amounts from text using regex
 const extractAmounts = (text: string): number[] => {
@@ -235,6 +237,10 @@ export const createInvoice = async (req: Request, res: Response) => {
       link: `/invoices/${createdInvoice._id}`,
     });
 
+    // 🔄 Auto-sync to Google Sheets + fire webhook
+    enqueue({ type: 'invoice', action: 'created', data: createdInvoice.toObject(), businessId: String(user.businessId) });
+    fire('invoice.created', String(user.businessId), createdInvoice.toObject());
+
     res.status(201).json(createdInvoice);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
@@ -303,6 +309,10 @@ export const updateInvoiceStatus = async (req: Request, res: Response) => {
     if (!invoice) {
       return res.status(404).json({ message: 'Invoice not found' });
     }
+
+    // 🔄 Sync status update to Google Sheets
+    enqueue({ type: 'invoice', action: 'updated', data: invoice.toObject(), businessId: String((req.user as any).businessId) });
+    fire('invoice.updated', String((req.user as any).businessId), invoice.toObject());
 
     res.status(200).json(invoice);
   } catch (error) {

@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
 import Payroll from '../models/Payroll.js';
+import { enqueue } from '../services/exportQueueService.js';
+import { fire } from '../services/webhookService.js';
 
 /**
  * @desc    Create a new payroll entry with a manual name
@@ -7,10 +9,8 @@ import Payroll from '../models/Payroll.js';
  */
 export const createPayroll = async (req: Request, res: Response) => {
   try {
-    // Explicitly destructure staffName to ensure it is captured from req.body
     const { staffName, salary, payday } = req.body;
 
-    // Validation check before attempting database insertion
     if (!staffName) {
       return res.status(400).json({ message: 'Employee name (staffName) is required' });
     }
@@ -23,13 +23,13 @@ export const createPayroll = async (req: Request, res: Response) => {
       status: 'pending',
     });
 
+    // 🔄 Auto-sync to Google Sheets + fire webhook
+    enqueue({ type: 'payroll', action: 'created', data: payroll.toObject(), businessId: String((req.user as any).businessId) });
+    fire('payroll.created', String((req.user as any).businessId), payroll.toObject());
+
     res.status(201).json(payroll);
   } catch (error) {
-    // This catches Mongoose validation errors
-    res.status(500).json({
-      message: 'Failed to create payroll',
-      error: (error as Error).message,
-    });
+    res.status(500).json({ message: 'Failed to create payroll', error: (error as Error).message });
     console.error('Error creating payroll:', error);
   }
 };
@@ -83,13 +83,17 @@ export const updatePayroll = async (req: Request, res: Response) => {
     });
 
     if (payroll) {
-      // Update fields only if they are provided in the request
       if (req.body.staffName) payroll.staffName = req.body.staffName;
       if (req.body.salary) payroll.salary = req.body.salary;
       if (req.body.payday) payroll.payday = req.body.payday;
       if (req.body.status) payroll.status = req.body.status;
 
       const updatedPayroll = await payroll.save();
+
+      // 🔄 Auto-sync to Google Sheets + fire webhook
+      enqueue({ type: 'payroll', action: 'updated', data: updatedPayroll.toObject(), businessId: String((req.user as any).businessId) });
+      fire('payroll.updated', String((req.user as any).businessId), updatedPayroll.toObject());
+
       res.json(updatedPayroll);
     } else {
       res.status(404).json({ message: 'Payroll not found' });

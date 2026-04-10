@@ -4,6 +4,7 @@ dotenv.config(); // MUST be first — before anything else
 
 import express, { type Application, type Request, type Response } from 'express';
 import cors from 'cors';
+import http from 'http';
 
 import connectDB from './config/db.js';
 
@@ -19,6 +20,11 @@ import invoiceRoutes from './routes/invoiceRoutes.js';
 import currencyRoutes from './routes/currencyRoutes.js';
 import scannedTransactionRoutes from './routes/scannedTransactionRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
+import exportRoutes from './routes/exportRoutes.js';
+import intelligenceRoutes from './routes/intelligenceRoutes.js';
+import projectRoutes from './routes/projectRoutes.js';
+import { initCronJobs } from './services/cronService.js';
+import { initSocketServer } from './services/socketService.js';
 
 const startServer = async () => {
   try {
@@ -26,6 +32,13 @@ const startServer = async () => {
     await connectDB();
 
     const app: Application = express();
+    const server = http.createServer(app);
+
+    // ✅ Initialize Socket.io
+    initSocketServer(server);
+
+    // ✅ Initialize Automation Scheduler
+    initCronJobs();
 
     // Middleware
     app.use(cors());
@@ -44,6 +57,9 @@ const startServer = async () => {
     app.use('/api/currency', currencyRoutes);
     app.use('/api/scanned-transactions', scannedTransactionRoutes);
     app.use('/api/activity', activityRoutes);
+    app.use('/api/export', exportRoutes);
+    app.use('/api/intelligence', intelligenceRoutes);
+    app.use('/api/projects', projectRoutes);
 
     // Root route
     app.get('/', (_req: Request, res: Response) => {
@@ -59,7 +75,7 @@ const startServer = async () => {
     });
 
     const PORT = Number(process.env.PORT) || 5000;
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
   } catch (error) {

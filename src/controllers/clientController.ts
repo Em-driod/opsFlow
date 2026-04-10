@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import Client from '../models/Client.js';
 import Business from '../models/Business.js';
+import { enqueue } from '../services/exportQueueService.js';
+import { fire } from '../services/webhookService.js';
 
 // @desc    Create a new client
 // @route   POST /api/clients
@@ -15,8 +17,12 @@ export const createClient = async (req: Request, res: Response) => {
       phone,
       businessValue,
       status,
-      businessId: (req.user as any).businessId, // Associate with the user's business
+      businessId: (req.user as any).businessId,
     });
+
+    // 🔄 Auto-sync to Google Sheets + fire webhook
+    enqueue({ type: 'client', action: 'created', data: client.toObject(), businessId: String((req.user as any).businessId) });
+    fire('client.created', String((req.user as any).businessId), client.toObject());
 
     res.status(201).json(client);
   } catch (error) {
@@ -66,19 +72,20 @@ export const updateClient = async (req: Request, res: Response) => {
     const client = await Client.findOne({
       _id: req.params.id,
       businessId: (req.user as any).businessId,
-    }); // Filter by businessId
+    });
     if (client) {
       client.name = req.body.name || client.name;
       client.email = req.body.email || client.email;
       client.phone = req.body.phone || client.phone;
       client.businessValue = req.body.businessValue || client.businessValue;
       client.status = req.body.status || client.status;
-      // Removed logic to update businessId, as it should be tied to the user and immutable here.
-      // if (req.body.businessId !== undefined) {
-      //     client.businessId = req.body.businessId;
-      // }
 
       const updatedClient = await client.save();
+
+      // 🔄 Auto-sync to Google Sheets + fire webhook
+      enqueue({ type: 'client', action: 'updated', data: updatedClient.toObject(), businessId: String((req.user as any).businessId) });
+      fire('client.updated', String((req.user as any).businessId), updatedClient.toObject());
+
       res.json(updatedClient);
     } else {
       res.status(404).json({ message: 'Client not found' });

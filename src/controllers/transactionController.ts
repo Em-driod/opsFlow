@@ -4,6 +4,10 @@ import Client from '../models/Client.js';
 import Tesseract from 'tesseract.js';
 
 import { createNotification } from './notificationController.js';
+import { enqueue } from '../services/exportQueueService.js';
+import { fire } from '../services/webhookService.js';
+import { emitToBusiness } from '../services/socketService.js';
+import { predictCategory, learnTransactionCategory } from '../services/learningService.js';
 
 // Category keywords for classification
 const categoryKeywords: Record<string, string[]> = {
@@ -115,8 +119,16 @@ export const scanTransaction = async (req: Request, res: Response) => {
     // Extract transaction data using pattern matching
     const amounts = extractAmounts(text);
     const type = determineType(text);
-    const category = determineCategory(text);
     const description = extractDescription(text);
+
+    // 🧠 Autonomous Learning Engine Prediction
+    const businessId = String((req.user as any).businessId);
+    let category = await predictCategory(businessId, description);
+    
+    // Fallback to static keyword deduction if no historical learning exists
+    if (!category) {
+      category = determineCategory(text);
+    }
 
     // Create transaction(s) from extracted data
     const transactions = amounts.length > 0
@@ -189,6 +201,9 @@ export const createTransaction = async (req: Request, res: Response) => {
       recordedBy,
     });
 
+    // 🧠 Learn from this manual categorization
+    await learnTransactionCategory(String(user.businessId), description || '', category);
+
     // Create a notification for the user who created the transaction
     await createNotification({
       businessId: user.businessId,
@@ -196,6 +211,13 @@ export const createTransaction = async (req: Request, res: Response) => {
       message: `New ${type} transaction of ${amount} recorded for client.`,
       link: `/transactions`,
     });
+
+    // 🔄 Auto-sync to Google Sheets + fire webhook
+    enqueue({ type: 'transaction', action: 'created', data: transaction.toObject(), businessId: String(user.businessId) });
+    fire('transaction.created', String(user.businessId), transaction.toObject());
+    
+    // 🔌 Emit Real-Time Event
+    emitToBusiness(String(user.businessId), 'data_updated', { type: 'transaction', action: 'created' });
 
     res.status(201).json(transaction);
   } catch (error) {
@@ -262,6 +284,16 @@ export const updateTransaction = async (req: Request, res: Response) => {
 
       const updatedTransaction = await transaction.save();
 
+      // 🧠 Learn from any corrections the user makes
+      await learnTransactionCategory(String((req.user as any).businessId), updatedTransaction.description || '', updatedTransaction.category);
+
+      // 🔄 Auto-sync to Google Sheets + fire webhook
+      enqueue({ type: 'transaction', action: 'updated', data: updatedTransaction.toObject(), businessId: String((req.user as any).businessId) });
+      fire('transaction.updated', String((req.user as any).businessId), updatedTransaction.toObject());
+      
+      // 🔌 Emit Real-Time Event
+      emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'transaction', action: 'updated' });
+
       res.json(updatedTransaction);
     } else {
       res.status(404).json({ message: 'Transaction not found' });
@@ -283,6 +315,10 @@ export const deleteTransaction = async (req: Request, res: Response) => {
     }); // Filter by businessId
     if (transaction) {
       await transaction.deleteOne();
+      
+      // 🔌 Emit Real-Time Event
+      emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'transaction', action: 'deleted' });
+
       res.json({ message: 'Transaction removed' });
     } else {
       res.status(404).json({ message: 'Transaction not found' });
