@@ -13,19 +13,18 @@ export const getKpis = async (req: Request, res: Response) => {
     const businessId = (req.user as any).businessId;
     const now = new Date();
     
-    // We'll calculate a 7-day trend array for the sparklines
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(now.getDate() - 7);
-    
-    const previousSevenDaysAgo = new Date(now);
-    previousSevenDaysAgo.setDate(now.getDate() - 14);
+    // Monthly Calculation (Start of current month to now)
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const startOfMonth = new Date(currentYear, currentMonth, 1);
+    const dayOfMonth = now.getDate(); // e.g. 1 to 31
 
-    // Get current 7-day aggregation
+    // Get current month aggregation
     const currentPeriodTransactions = await Transaction.aggregate([
       {
         $match: {
           businessId: new mongoose.Types.ObjectId(businessId),
-          createdAt: { $gte: sevenDaysAgo },
+          createdAt: { $gte: startOfMonth },
         },
       },
       {
@@ -39,29 +38,29 @@ export const getKpis = async (req: Request, res: Response) => {
       },
     ]);
 
-    // Format into daily buckets for the sparkline [Day1, Day2, ... Day7]
-    const incomeTrend: number[] = Array(7).fill(0);
-    const expenseTrend: number[] = Array(7).fill(0);
+    // Format into daily buckets for the sparkline: [Day1, Day2, ... Day(Today)]
+    const incomeTrend: number[] = Array(dayOfMonth).fill(0);
+    const expenseTrend: number[] = Array(dayOfMonth).fill(0);
     let totalIncome = 0;
     let totalExpenses = 0;
 
     currentPeriodTransactions.forEach(t => {
        const [y, m, d] = t._id.day.split('-');
-       const dateOfTx = new Date(Number(y), Number(m) - 1, Number(d));
-       // Calculate index (0 to 6) based on days ago
-       const diffTime = Math.abs(now.getTime() - dateOfTx.getTime());
-       const diffDays = 6 - Math.min(6, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
-       
-       if (t._id.type === 'income') {
-         incomeTrend[diffDays] += t.total;
-         totalIncome += t.total;
-       } else {
-         expenseTrend[diffDays] += t.total;
-         totalExpenses += t.total;
+       const dayIndex = Number(d) - 1; // 1st day = index 0
+
+       // Safety check in case of time zone quirks
+       if (dayIndex >= 0 && dayIndex < dayOfMonth) {
+         if (t._id.type === 'income') {
+           incomeTrend[dayIndex] += t.total;
+           totalIncome += t.total;
+         } else {
+           expenseTrend[dayIndex] += t.total;
+           totalExpenses += t.total;
+         }
        }
     });
 
-    const netProfitTrend = incomeTrend.map((inc, i) => inc - expenseTrend[i]);
+    const netProfitTrend = incomeTrend.map((inc, i) => inc - (expenseTrend[i] || 0));
     const netProfit = totalIncome - totalExpenses;
 
     const totalClients = await Client.countDocuments({ businessId, status: 'active' });

@@ -23,14 +23,14 @@ export const parseCommand = async (req: Request, res: Response) => {
       return res.status(500).json({ message: 'Gemini API not configured' });
     }
 
-    // 1. Fetch Context (Last 30 Days of data for this business)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // 1. Fetch Context (Data for the current month for this business)
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [recentTransactions, activeClients, pendingInvoices] = await Promise.all([
-      Transaction.find({ businessId, createdAt: { $gte: thirtyDaysAgo } })
+      Transaction.find({ businessId, createdAt: { $gte: startOfMonth } })
         .sort({ createdAt: -1 })
-        .limit(50)
+        .limit(100) // increased limit since a month can have more
         .select('amount type description category createdAt'),
       Client.find({ businessId, status: 'active' }).select('name email balance businessValue'),
       Invoice.find({ businessId, status: { $in: ['sent', 'overdue'] } }).select('invoiceNumber total dueDate status customClientName')
@@ -45,7 +45,7 @@ export const parseCommand = async (req: Request, res: Response) => {
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.5-pro",
       systemInstruction: `You are an elite, highly intelligent financial CFO Assistant for OpsFlow. 
-You have direct access to the user's live database context.
+You have direct access to the user's live database context for the *current calendar month*.
 Here is the JSON context of their recent business data: ${contextDump}
 
 Your job is to determine the user's intent from their command and respond strictly in JSON.
@@ -63,7 +63,7 @@ If the user wants to LOG a transaction (e.g., "I spent $50 on Uber", "Got paid $
 If the user asks an ANALYTICAL QUESTION (e.g., "Who owes me the most?", "How much did we spend on software?"):
 {
   "intent": "QUERY_DATA",
-  "markdownResponse": "Write a highly professional, beautifully formatted Markdown response answering their question using the provided context. Use bolding and short bullet points. Be concise. Sound like an elite CFO. If you don't know the answer because it's not in the context, say 'I can only analyze the last 30 days of data and top clients currently...'"
+  "markdownResponse": "Write a highly professional, beautifully formatted Markdown response answering their question using the provided context. Use bolding and short bullet points. Be concise. Sound like an elite CFO. If you don't know the answer because it's not in the context, say 'I can only analyze data for the current calendar month and top clients currently...'"
 }
 
 Rules:
