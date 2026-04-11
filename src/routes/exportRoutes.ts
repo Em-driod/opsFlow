@@ -1,6 +1,6 @@
 // src/routes/exportRoutes.ts
 import express from 'express';
-import { protect } from '../middleware/authMiddleware.js';
+import { protect } from '../middleware/auth.js';
 import {
   connectSheet,
   disconnectSheet,
