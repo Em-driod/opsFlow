@@ -83,17 +83,18 @@ export const getBusinessAdvisorState = async (req: Request, res: Response) => {
       try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
         const prompt = `
-          You are the elite "OpsFlow Intelligence Advisor" for a small business.
-          Here is their current 90-day financial health:
-          - Cash Runway: ${cashRunwayMonths.toFixed(1)} months
-          - Average Monthly Burn Rate: $${monthlyBurnRate.toFixed(2)}
-          - Net Margin: ${netMargin.toFixed(1)}%
+          You are a friendly business helper for a small shop or business owner.
+          Current status:
+          - Cash lasts: ${cashRunwayMonths.toFixed(1)} months
+          - Monthly spending: $${monthlyBurnRate.toFixed(2)}
+          - Profit: ${netMargin.toFixed(1)}%
           - Active Clients: ${activeClients}
-          - Overdue Debt: $${overdueAmount.toFixed(2)}
-          - proprietary Health Score: ${Math.round(healthScore)}/100
+          - Unpaid bills: $${overdueAmount.toFixed(2)}
+          - Business Score: ${Math.round(healthScore)}/100
 
-          Provide exactly ONE short, punchy, aggressive, highly-actionable paragraph of advice (max 3 sentences). 
-          Sound like a premium fintech CFO. Do not use pleasantries. Tell them exactly what to fix or what to scale.
+          Give one very simple, short piece of advice (max 2 small sentences). 
+          Use basic, easy words. Be encouraging and helpful. 
+          Don't sound like a bank or a corporate boss. Sound like a helpful friend.
         `;
         
         const result = await model.generateContent(prompt);
