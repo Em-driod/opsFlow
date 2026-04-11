@@ -1,15 +1,19 @@
 import type { Request, Response } from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Transaction from '../models/Transaction.js';
+import Client from '../models/Client.js';
+import Invoice from '../models/Invoice.js';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// @desc    Parse natural language into structured transaction data
+// @desc    Parse natural language into structured data OR answer a contextual query
 // @route   POST /api/intelligence/parse
 // @access  Private
 export const parseCommand = async (req: Request, res: Response) => {
   try {
     const { command } = req.body;
+    const businessId = (req.user as any).businessId;
     
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ message: 'Invalid command provided' });
@@ -19,31 +23,59 @@ export const parseCommand = async (req: Request, res: Response) => {
       return res.status(500).json({ message: 'Gemini API not configured' });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+    // 1. Fetch Context (Last 30 Days of data for this business)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const [recentTransactions, activeClients, pendingInvoices] = await Promise.all([
+      Transaction.find({ businessId, createdAt: { $gte: thirtyDaysAgo } })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .select('amount type description category createdAt'),
+      Client.find({ businessId, status: 'active' }).select('name email balance businessValue'),
+      Invoice.find({ businessId, status: { $in: ['sent', 'overdue'] } }).select('invoiceNumber total dueDate status customClientName')
+    ]);
+
+    const contextDump = JSON.stringify({
+      recentTransactions,
+      activeClients,
+      pendingInvoices
+    });
+
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-pro",
+      systemInstruction: `You are an elite, highly intelligent financial CFO Assistant for OpsFlow. 
+You have direct access to the user's live database context.
+Here is the JSON context of their recent business data: ${contextDump}
+
+Your job is to determine the user's intent from their command and respond strictly in JSON.
+
+If the user wants to LOG a transaction (e.g., "I spent $50 on Uber", "Got paid $1000"):
+{
+  "intent": "LOG_TRANSACTION",
+  "data": {
+    "amount": number,
+    "type": "income" | "expense",
+    "description": string
+  }
+}
+
+If the user asks an ANALYTICAL QUESTION (e.g., "Who owes me the most?", "How much did we spend on software?"):
+{
+  "intent": "QUERY_DATA",
+  "markdownResponse": "Write a highly professional, beautifully formatted Markdown response answering their question using the provided context. Use bolding and short bullet points. Be concise. Sound like an elite CFO. If you don't know the answer because it's not in the context, say 'I can only analyze the last 30 days of data and top clients currently...'"
+}
+
+Rules:
+- YOU MUST RESPOND ONLY IN VALID JSON. NEVER include \`\`\`json wrappers. 
+- Do not output anything outside the JSON structure.
+`
+    });
     
-    const prompt = `
-      You are an elite financial assistant for the OpsFlow application.
-      The user wants to log a transaction using natural language.
-      Parse the following user command: "${command}"
-
-      Extract the following information:
-      - amount (number)
-      - type ('income' or 'expense')
-      - description (string)
-
-      Rules:
-      - Always respond ONLY with a valid JSON object.
-      - Do not wrap the JSON in Markdown code blocks (no \`\`\`json).
-      - If you cannot determine the amount, default to 0.
-      - If you cannot determine the type, make your best guess based on the context (e.g. "spent", "bought", "paid for" = expense. "received", "earned", "paid by" = income).
-      - Ensure the JSON fields exactly match the names 'amount', 'type', and 'description'.
-    `;
-
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(command);
     const textOutput = result.response.text().trim();
     
-    // Clean up potential markdown wrapper from Gemini (even though we asked it not to)
-    const cleanedJson = textOutput.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    const cleanedJson = textOutput.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
     
     let parsedData;
     try {
@@ -53,9 +85,8 @@ export const parseCommand = async (req: Request, res: Response) => {
       return res.status(422).json({ message: 'Failed to extract structured data from command' });
     }
 
-    // Validate structure
-    if (typeof parsedData.amount !== 'number' || (parsedData.type !== 'income' && parsedData.type !== 'expense')) {
-      return res.status(422).json({ message: 'AI returned invalid structure', rawData: parsedData });
+    if (!parsedData.intent || !['LOG_TRANSACTION', 'QUERY_DATA'].includes(parsedData.intent)) {
+      return res.status(422).json({ message: 'AI returned invalid intent structure', rawData: parsedData });
     }
 
     res.status(200).json(parsedData);

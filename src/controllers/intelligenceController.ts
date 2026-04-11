@@ -75,15 +75,19 @@ export const getBusinessAdvisorState = async (req: Request, res: Response) => {
 
     healthScore = Math.max(0, Math.min(100, healthScore)); // Clamp 0-100
 
-    // 3. Generate Gemini 2.5 Pro Advice
-    let aiAdvice = "Keep focusing on building your pipeline to generate intelligent insights.";
+    // 3. Generate Gemini 2.5 Pro Scenarios
+    let aiScenarios: Array<{ title: string; impact: string; action: string }> = [
+      { title: "Optimize Pipeline", impact: "+ Baseline", action: "Focus on generating intelligent insights." }
+    ];
     let aiStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
 
     if (apiKey) {
       try {
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.5-pro",
+            systemInstruction: "You are an elite, highly intelligent financial CFO Assistant. Output MUST be valid JSON, containing an array of 'scenarios'."
+        });
         const prompt = `
-          You are a friendly business helper for a small shop or business owner.
           Current status:
           - Cash lasts: ${cashRunwayMonths.toFixed(1)} months
           - Monthly spending: $${monthlyBurnRate.toFixed(2)}
@@ -92,13 +96,34 @@ export const getBusinessAdvisorState = async (req: Request, res: Response) => {
           - Unpaid bills: $${overdueAmount.toFixed(2)}
           - Business Score: ${Math.round(healthScore)}/100
 
-          Give one very simple, short piece of advice (max 2 small sentences). 
-          Use basic, easy words. Be encouraging and helpful. 
-          Don't sound like a bank or a corporate boss. Sound like a helpful friend.
+          Generate exactly 2 actionable 'Scenarios' tailored for the business owner.
+          For example, if they have unpaid bills, suggest a scenario about collecting it. 
+          If runway is low, suggest cutting a % of spending.
+          Calculate the actual mathematical impact.
+
+          Return exactly this JSON format (no markdown wrappers):
+          {
+            "scenarios": [
+              {
+                "title": "Short title describing the action",
+                "impact": "+$X or +Y months",
+                "action": "One actionable sentence."
+              }
+            ]
+          }
         `;
         
         const result = await model.generateContent(prompt);
-        aiAdvice = result.response.text();
+        const textOutput = result.response.text().trim().replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+        
+        try {
+            const parsed = JSON.parse(textOutput);
+            if (parsed.scenarios && Array.isArray(parsed.scenarios)) {
+                aiScenarios = parsed.scenarios;
+            }
+        } catch(e) {
+            console.error('Failed to parse AI Scenarios:', e);
+        }
         
         if (healthScore < 40 || cashRunwayMonths < 2) aiStatus = 'critical';
         else if (healthScore < 70 || cashRunwayMonths < 6 || overdueAmount > monthlyIncome) aiStatus = 'warning';
@@ -117,7 +142,7 @@ export const getBusinessAdvisorState = async (req: Request, res: Response) => {
         overdueDebt: Number(overdueAmount.toFixed(2))
       },
       advisor: {
-        message: aiAdvice,
+        scenarios: aiScenarios,
         status: aiStatus
       }
     });

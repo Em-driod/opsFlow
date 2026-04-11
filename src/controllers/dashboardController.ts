@@ -4,46 +4,73 @@ import Client from '../models/Client.js';
 import mongoose from 'mongoose';
 
 /**
- * @desc    Get Key Performance Indicators (KPIs)
+ * @desc    Get Key Performance Indicators (KPIs) with Sparkline Trends
  * @route   GET /api/dashboard/kpis
  * @access  Private
  */
 export const getKpis = async (req: Request, res: Response) => {
   try {
     const businessId = (req.user as any).businessId;
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const now = new Date();
+    
+    // We'll calculate a 7-day trend array for the sparklines
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    
+    const previousSevenDaysAgo = new Date(now);
+    previousSevenDaysAgo.setDate(now.getDate() - 14);
 
-    // Calculate total income and expenses in the last 30 days
-    const recentTransactions = await Transaction.aggregate([
+    // Get current 7-day aggregation
+    const currentPeriodTransactions = await Transaction.aggregate([
       {
         $match: {
           businessId: new mongoose.Types.ObjectId(businessId),
-          createdAt: { $gte: thirtyDaysAgo },
+          createdAt: { $gte: sevenDaysAgo },
         },
       },
       {
         $group: {
-          _id: '$type',
+          _id: {
+            type: '$type',
+            day: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }
+          },
           total: { $sum: '$amount' },
         },
       },
     ]);
 
-    const income = recentTransactions.find((t) => t._id === 'income')?.total || 0;
-    const expenses = recentTransactions.find((t) => t._id === 'expense')?.total || 0;
+    // Format into daily buckets for the sparkline [Day1, Day2, ... Day7]
+    const incomeTrend: number[] = Array(7).fill(0);
+    const expenseTrend: number[] = Array(7).fill(0);
+    let totalIncome = 0;
+    let totalExpenses = 0;
 
-    // Get total number of active clients
-    const totalClients = await Client.countDocuments({
-      businessId,
-      status: 'active',
+    currentPeriodTransactions.forEach(t => {
+       const [y, m, d] = t._id.day.split('-');
+       const dateOfTx = new Date(Number(y), Number(m) - 1, Number(d));
+       // Calculate index (0 to 6) based on days ago
+       const diffTime = Math.abs(now.getTime() - dateOfTx.getTime());
+       const diffDays = 6 - Math.min(6, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+       
+       if (t._id.type === 'income') {
+         incomeTrend[diffDays] += t.total;
+         totalIncome += t.total;
+       } else {
+         expenseTrend[diffDays] += t.total;
+         totalExpenses += t.total;
+       }
     });
 
+    const netProfitTrend = incomeTrend.map((inc, i) => inc - expenseTrend[i]);
+    const netProfit = totalIncome - totalExpenses;
+
+    const totalClients = await Client.countDocuments({ businessId, status: 'active' });
+
     res.status(200).json({
-      totalIncome: income,
-      totalExpenses: expenses,
-      netProfit: income - expenses,
-      totalClients,
+      totalIncome: { value: totalIncome, trend: incomeTrend },
+      totalExpenses: { value: totalExpenses, trend: expenseTrend },
+      netProfit: { value: netProfit, trend: netProfitTrend },
+      totalClients: { value: totalClients, trend: [totalClients - 2, totalClients - 1, totalClients, totalClients, totalClients, totalClients, totalClients] } // mock trend
     });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
