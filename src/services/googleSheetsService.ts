@@ -1,10 +1,9 @@
 // src/services/googleSheetsService.ts
-// Google Sheets sync engine for OpsFlow - Axios Version
-// REASON: Switched to Axios + JWT to avoid dependency installation issues with googleapis
+// Google Sheets sync engine for OpsFlow - User OAuth2 Version
 // Handles all reads/writes to the connected business spreadsheet using the Google Sheets REST API directly.
 
 import axios from 'axios';
-import jwt from 'jsonwebtoken';
+import ExportConfig from '../models/ExportConfig.js';
 
 // Tab names — these are auto-created in the sheet
 export const SHEET_TABS = {
@@ -34,68 +33,74 @@ const HEADERS = {
   ],
 };
 
-let cachedToken: { token: string; expiry: number } | null = null;
-
 /**
- * Get an OAuth2 Access Token for the Google Sheets API using the Service Account credentials.
+ * Get an OAuth2 Access Token for the user via ExportConfig. If expired, automatically refresh it.
  */
-async function getAccessToken(): Promise<string> {
-  // Use cache if not expired
-  if (cachedToken && cachedToken.expiry > Date.now() + 60000) {
-    return cachedToken.token;
+async function getOAuth2AccessToken(businessId: string): Promise<string> {
+  const config = await ExportConfig.findOne({ businessId });
+  if (!config || !config.googleRefreshToken || !config.googleAccessToken) {
+    throw new Error('Google Sheets OAuth not connected for this business.');
   }
 
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
-
-  if (!email || !rawKey) {
-    throw new Error(
-      'Google Sheets credentials not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in .env',
-    );
+  const now = Date.now();
+  // 60-second buffer
+  if (config.googleTokenExpiry && config.googleTokenExpiry > now + 60000) {
+    return config.googleAccessToken;
   }
 
-  const privateKey = rawKey.replace(/\\n/g, '\n');
-  const now = Math.floor(Date.now() / 1000);
-
-  const payload = {
-    iss: email,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  };
-
-  const token = jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+  // Need to refresh token
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  
+  if (!clientId || !clientSecret) {
+    throw new Error('GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured');
+  }
 
   try {
-    const response = await axios.post('https://oauth2.googleapis.com/token', 
-      new URLSearchParams({
-        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-        assertion: token,
-      }).toString(),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    const response = await axios.post('https://oauth2.googleapis.com/token', null, {
+      params: {
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: config.googleRefreshToken,
+        grant_type: 'refresh_token',
       }
-    );
+    });
 
-    const accessToken = response.data.access_token;
-    cachedToken = {
-      token: accessToken,
-      expiry: Date.now() + (response.data.expires_in * 1000),
-    };
+    const accessToken: string = response.data.access_token;
+    config.googleAccessToken = accessToken;
+    config.googleTokenExpiry = now + (response.data.expires_in * 1000);
+    await config.save();
 
     return accessToken;
   } catch (error: any) {
-    console.error('[Sheets Auth] Token fetch failed:', error.response?.data || error.message);
-    throw new Error('Failed to authenticate with Google Sheets API');
+    console.error('[Sheets Auth] Token refresh failed:', error.response?.data || error.message);
+    throw new Error('Failed to refresh Google Sheets OAuth token');
   }
+}
+
+/**
+ * Creates a new blank Google Spreadsheet and returns the spreadsheetId
+ */
+export async function createSpreadsheet(businessId: string, title: string): Promise<string> {
+  const token = await getOAuth2AccessToken(businessId);
+  const response = await axios.post(
+    'https://sheets.googleapis.com/v4/spreadsheets',
+    { properties: { title } },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data.spreadsheetId;
 }
 
 /**
  * API call helper
  */
-async function sheetsApiCall(method: 'get' | 'post', sheetId: string, endpoint: string, data?: any) {
-  const token = await getAccessToken();
+async function sheetsApiCall(businessId: string, method: 'get' | 'post', sheetId: string, endpoint: string, data?: any) {
+  const token = await getOAuth2AccessToken(businessId);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}${endpoint}`;
   
   try {
@@ -118,28 +123,27 @@ async function sheetsApiCall(method: 'get' | 'post', sheetId: string, endpoint: 
 /**
  * Ensure a tab exists in the sheet; create it with headers if not
  */
-async function ensureTabExists(sheetId: string, tabName: string): Promise<void> {
+async function ensureTabExists(businessId: string, sheetId: string, tabName: string): Promise<void> {
   try {
     // Get existing sheets
-    const meta = await sheetsApiCall('get', sheetId, '?fields=sheets.properties.title');
+    const meta = await sheetsApiCall(businessId, 'get', sheetId, '?fields=sheets.properties.title');
     const existing = meta.sheets?.map((s: any) => s.properties?.title) ?? [];
 
     if (!existing.includes(tabName)) {
       // Create the tab
-      await sheetsApiCall('post', sheetId, ':batchUpdate', {
+      await sheetsApiCall(businessId, 'post', sheetId, ':batchUpdate', {
         requests: [{ addSheet: { properties: { title: tabName } } }],
       });
 
       // Write headers
       const headers = HEADERS[tabName];
       if (headers) {
-        await sheetsApiCall('post', sheetId, `/values/'${tabName}'!A1:update?valueInputOption=RAW`, {
+        await sheetsApiCall(businessId, 'post', sheetId, `/values/'${tabName}'!A1:update?valueInputOption=RAW`, {
           values: [headers]
         });
       }
     }
   } catch (err: any) {
-    // Handle case where we might have tried to add a sheet that was added since we checked
     if (err.response?.status !== 400) {
        console.error(`[Sheets] Failed to ensure tab "${tabName}":`, err.message);
     }
@@ -149,10 +153,10 @@ async function ensureTabExists(sheetId: string, tabName: string): Promise<void> 
 /**
  * Append a single row to a tab
  */
-export async function appendRow(sheetId: string, tabName: string, rowData: (string | number)[]): Promise<boolean> {
+export async function appendRow(businessId: string, sheetId: string, tabName: string, rowData: (string | number)[]): Promise<boolean> {
   try {
-    await ensureTabExists(sheetId, tabName);
-    await sheetsApiCall('post', sheetId, `/values/'${tabName}'!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    await ensureTabExists(businessId, sheetId, tabName);
+    await sheetsApiCall(businessId, 'post', sheetId, `/values/'${tabName}'!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       values: [rowData]
     });
     return true;
@@ -164,11 +168,11 @@ export async function appendRow(sheetId: string, tabName: string, rowData: (stri
 /**
  * Batch append multiple rows (used for historical sync)
  */
-export async function batchAppendRows(sheetId: string, tabName: string, rows: (string | number)[][]): Promise<boolean> {
+export async function batchAppendRows(businessId: string, sheetId: string, tabName: string, rows: (string | number)[][]): Promise<boolean> {
   if (!rows.length) return true;
   try {
-    await ensureTabExists(sheetId, tabName);
-    await sheetsApiCall('post', sheetId, `/values/'${tabName}'!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    await ensureTabExists(businessId, sheetId, tabName);
+    await sheetsApiCall(businessId, 'post', sheetId, `/values/'${tabName}'!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       values: rows
     });
     return true;
@@ -180,7 +184,7 @@ export async function batchAppendRows(sheetId: string, tabName: string, rows: (s
 /**
  * Write summary row to the summary tab
  */
-export async function writeSummaryRow(sheetId: string, summary: {
+export async function writeSummaryRow(businessId: string, sheetId: string, summary: {
   date: string;
   totalIncome: number;
   totalExpenses: number;
@@ -189,7 +193,7 @@ export async function writeSummaryRow(sheetId: string, summary: {
   pendingInvoices: number;
   paidInvoices: number;
 }): Promise<boolean> {
-  return appendRow(sheetId, SHEET_TABS.SUMMARY, [
+  return appendRow(businessId, sheetId, SHEET_TABS.SUMMARY, [
     summary.date,
     summary.totalIncome,
     summary.totalExpenses,
@@ -203,15 +207,13 @@ export async function writeSummaryRow(sheetId: string, summary: {
 /**
  * Initialize ALL tabs in a sheet
  */
-export async function initializeSheetTabs(sheetId: string): Promise<void> {
+export async function initializeSheetTabs(businessId: string, sheetId: string): Promise<void> {
   for (const tabName of Object.values(SHEET_TABS)) {
-    await ensureTabExists(sheetId, tabName);
+    await ensureTabExists(businessId, sheetId, tabName);
   }
 }
 
-/**
- * Format helpers
- */
+// Format helpers remain the same...
 export function transactionToRow(tx: any): (string | number)[] {
   return [
     String(tx._id),
@@ -267,9 +269,9 @@ export function payrollToRow(pay: any): (string | number)[] {
 /**
  * Validate that we can access a sheet
  */
-export async function validateSheetAccess(sheetId: string): Promise<{ valid: boolean; title?: string; error?: string }> {
+export async function validateSheetAccess(businessId: string, sheetId: string): Promise<{ valid: boolean; title?: string; error?: string }> {
   try {
-    const meta = await sheetsApiCall('get', sheetId, '?fields=properties.title');
+    const meta = await sheetsApiCall(businessId, 'get', sheetId, '?fields=properties.title');
     return { valid: true, title: meta.properties?.title ?? 'Untitled Sheet' };
   } catch (err: any) {
     return { valid: false, error: err.response?.data?.error?.message || 'Could not access the spreadsheet' };

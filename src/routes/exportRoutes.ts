@@ -2,7 +2,8 @@
 import express from 'express';
 import { protect } from '../middleware/auth.js';
 import {
-  connectSheet,
+  googleAuthRedirect,
+  googleAuthCallback,
   disconnectSheet,
   getExportStatus,
   toggleAutoSync,
@@ -16,11 +17,14 @@ import {
 
 const router = express.Router();
 
-// All routes are protected
+// OAuth routes (Public initially, auth checked inside or via URL token)
+router.get('/google/auth', googleAuthRedirect);
+router.get('/google/callback', googleAuthCallback);
+
+// All other routes are protected
 router.use(protect);
 
 // Sheet connection
-router.post('/connect', connectSheet);
 router.post('/disconnect', disconnectSheet);
 
 // Status & control

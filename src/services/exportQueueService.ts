@@ -79,7 +79,7 @@ async function processJob(job: SyncJob): Promise<void> {
         break;
     }
 
-    const success = await appendRow(sheetId, tabName, row);
+    const success = await appendRow(job.businessId, sheetId, tabName, row);
 
     // Log the sync event in the config document
     const eventEntry = {

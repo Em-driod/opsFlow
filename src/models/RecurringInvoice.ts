@@ -1,7 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export interface IInvoice extends Document {
-  invoiceNumber: string;
+export interface IRecurringInvoice extends Document {
   businessId: mongoose.Types.ObjectId;
   clientId?: mongoose.Types.ObjectId | null;
   customClientName?: string | null;
@@ -15,22 +14,24 @@ export interface IInvoice extends Document {
   subtotal: number;
   tax: number;
   total: number;
-  status: 'draft' | 'sent' | 'paid' | 'overdue';
-  dueDate: Date;
   notes?: string;
-  transactionId?: mongoose.Types.ObjectId;
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+  dayOfMonth?: number;
+  nextRunDate: Date;
+  lastRunDate?: Date;
+  isActive: boolean;
+  dueDaysAfter: number;
 }
 
-const LineItemSchema: Schema = new Schema({
+const LineItemSchema = new Schema({
   description: { type: String, required: true },
   quantity: { type: Number, required: true, default: 1 },
   unitPrice: { type: Number, required: true },
   total: { type: Number, required: true },
 });
 
-const InvoiceSchema: Schema = new Schema(
+const RecurringInvoiceSchema: Schema = new Schema(
   {
-    invoiceNumber: { type: String, required: true, unique: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
     customClientName: { type: String, default: null },
@@ -39,14 +40,15 @@ const InvoiceSchema: Schema = new Schema(
     subtotal: { type: Number, required: true },
     tax: { type: Number, default: 0 },
     total: { type: Number, required: true },
-    status: { type: String, enum: ['draft', 'sent', 'paid', 'overdue'], default: 'draft' },
-    dueDate: { type: Date, required: true },
     notes: { type: String },
-    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    frequency: { type: String, enum: ['weekly', 'monthly', 'quarterly', 'yearly'], required: true },
+    dayOfMonth: { type: Number },
+    nextRunDate: { type: Date, required: true },
+    lastRunDate: { type: Date },
+    isActive: { type: Boolean, default: true },
+    dueDaysAfter: { type: Number, default: 7 },
   },
   { timestamps: true },
 );
 
-// Auto-increment invoice number pre-save hook can be added here in a real app
-
-export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);
+export default mongoose.model<IRecurringInvoice>('RecurringInvoice', RecurringInvoiceSchema);

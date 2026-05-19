@@ -6,7 +6,8 @@ export interface IPayroll extends Document {
   salary: number;
   payday: Date;
   status: 'pending' | 'paid';
-  staffId?: mongoose.Types.ObjectId; // Optional - can be removed if never used
+  staffId?: mongoose.Types.ObjectId;
+  transactionId?: mongoose.Types.ObjectId;
 }
 
 const PayrollSchema: Schema = new Schema(
@@ -16,7 +17,8 @@ const PayrollSchema: Schema = new Schema(
     salary: { type: Number, required: true },
     payday: { type: Date, required: true },
     status: { type: String, enum: ['pending', 'paid'], default: 'pending' },
-    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false }, // Optional
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', required: false },
   },
   { timestamps: true },
 );

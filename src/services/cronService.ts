@@ -1,61 +1,77 @@
-import Business from '../models/Business.js';
+import cron from 'node-cron';
 import ExportConfig from '../models/ExportConfig.js';
 import Transaction from '../models/Transaction.js';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import { writeSummaryRow } from './googleSheetsService.js';
+import { generateDueRecurringInvoices } from '../controllers/recurringInvoiceController.js';
 
 /**
- * Scheduled jobs for OpsFlow Automation - Manual Timer Version
- * REASON: Uses setInterval to avoid node-cron dependency install issues.
+ * Scheduled jobs for OpsFlow Automation.
+ * Uses node-cron so the schedule survives process restarts as long as the
+ * process itself is supervised — restart picks up the next cron tick rather
+ * than re-arming a one-shot setTimeout that may have already fired.
  */
+
+const NIGHTLY_SUMMARY_CRON = process.env.NIGHTLY_SUMMARY_CRON || '59 23 * * *';
+const OVERDUE_SWEEP_CRON = process.env.OVERDUE_SWEEP_CRON || '*/30 * * * *';
+const RECURRING_INVOICE_CRON = process.env.RECURRING_INVOICE_CRON || '0 7 * * *';
+
 export const initCronJobs = () => {
-  // Run once every 6 hours to check if it's "Summary Time" (near 11:59 PM)
-  // Or more simply, let's just use a dedicated timeout for the next run.
-  scheduleNextRun();
-  console.log('[Cron] Manual automation scheduler initialized.');
-};
-
-function scheduleNextRun() {
-  const now = new Date();
-  const nextRun = new Date(now);
-  nextRun.setHours(23, 59, 0, 0);
-
-  // If it's already past 11:59 PM, schedule for tomorrow
-  if (now > nextRun) {
-    nextRun.setDate(nextRun.getDate() + 1);
+  if (!cron.validate(NIGHTLY_SUMMARY_CRON)) {
+    console.warn(`[Cron] Invalid NIGHTLY_SUMMARY_CRON expression "${NIGHTLY_SUMMARY_CRON}". Skipping summary job.`);
+  } else {
+    cron.schedule(NIGHTLY_SUMMARY_CRON, runNightlyJob);
+    console.log(`[Cron] Nightly summary scheduled: "${NIGHTLY_SUMMARY_CRON}"`);
   }
 
-  const delay = nextRun.getTime() - now.getTime();
-  
-  console.log(`[Cron] Next summary report scheduled in ${Math.round(delay / 1000 / 60)} minutes.`);
+  if (!cron.validate(OVERDUE_SWEEP_CRON)) {
+    console.warn(`[Cron] Invalid OVERDUE_SWEEP_CRON expression "${OVERDUE_SWEEP_CRON}". Skipping overdue sweep.`);
+  } else {
+    cron.schedule(OVERDUE_SWEEP_CRON, markOverdueInvoices);
+    console.log(`[Cron] Overdue invoice sweep scheduled: "${OVERDUE_SWEEP_CRON}"`);
+  }
 
-  setTimeout(async () => {
-    await runNightlyJob();
-    scheduleNextRun(); // Reschedule for next day
-  }, delay);
-}
+  if (!cron.validate(RECURRING_INVOICE_CRON)) {
+    console.warn(`[Cron] Invalid RECURRING_INVOICE_CRON expression "${RECURRING_INVOICE_CRON}". Skipping recurring invoices job.`);
+  } else {
+    cron.schedule(RECURRING_INVOICE_CRON, generateDueRecurringInvoices);
+    console.log(`[Cron] Recurring invoices scheduled: "${RECURRING_INVOICE_CRON}"`);
+  }
+};
 
 async function runNightlyJob() {
-  console.log('[Cron] Running nightly summary report for all connected businesses...');
-  
+  console.log('[Cron] Running nightly jobs...');
   try {
-    // Find all businesses with connected sheets
+    await markOverdueInvoices();
+
     const configs = await ExportConfig.find({ sheetsConnected: true, googleSheetId: { $ne: '' } });
-    
     for (const config of configs) {
       await processDailySummary(config);
     }
-    
     console.log(`[Cron] Completed nightly summary for ${configs.length} businesses.`);
   } catch (error) {
-    console.error('[Cron] Error in nightly summary job:', error);
+    console.error('[Cron] Error in nightly job:', error);
   }
 }
 
-/**
- * Process and write the daily summary for a specific business
- */
+async function markOverdueInvoices() {
+  try {
+    const result = await Invoice.updateMany(
+      {
+        dueDate: { $lt: new Date() },
+        status: { $in: ['draft', 'sent'] },
+      },
+      { $set: { status: 'overdue' } },
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`[Cron] Marked ${result.modifiedCount} invoices as overdue.`);
+    }
+  } catch (error) {
+    console.error('[Cron] Failed to mark overdue invoices:', error);
+  }
+}
+
 async function processDailySummary(config: any) {
   try {
     const businessId = config.businessId;
@@ -65,33 +81,31 @@ async function processDailySummary(config: any) {
     const endDate = new Date(today);
     endDate.setHours(23, 59, 59, 999);
 
-    // Fetch aggregate data
     const [incomeAgg, expenseAgg, totalClients, invoices] = await Promise.all([
       Transaction.aggregate([
         { $match: { businessId, type: 'income', createdAt: { $gte: startDate, $lte: endDate } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
+        { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
       Transaction.aggregate([
         { $match: { businessId, type: 'expense', createdAt: { $gte: startDate, $lte: endDate } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
+        { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
       Client.countDocuments({ businessId }),
-      Invoice.find({ businessId })
+      Invoice.find({ businessId }),
     ]);
 
     const totalIncome = incomeAgg[0]?.total ?? 0;
     const totalExpenses = expenseAgg[0]?.total ?? 0;
 
-    await writeSummaryRow(config.googleSheetId, {
+    await writeSummaryRow(String(businessId), config.googleSheetId, {
       date: today.toLocaleDateString(),
       totalIncome,
       totalExpenses,
       netProfit: totalIncome - totalExpenses,
-      totalClients: totalClients,
+      totalClients,
       pendingInvoices: invoices.filter((i: any) => i.status === 'sent' || i.status === 'overdue').length,
       paidInvoices: invoices.filter((i: any) => i.status === 'paid').length,
     });
-
   } catch (error) {
     console.error(`[Cron] Failed to process summary for business ${config.businessId}:`, error);
   }

@@ -23,6 +23,10 @@ import activityRoutes from './routes/activityRoutes.js';
 import exportRoutes from './routes/exportRoutes.js';
 import intelligenceRoutes from './routes/intelligenceRoutes.js';
 import projectRoutes from './routes/projectRoutes.js';
+import automationRoutes from './routes/automationRoutes.js';
+import capitalAssetRoutes from './routes/capitalAssetRoutes.js';
+import taxRoutes from './routes/taxRoutes.js';
+import recurringInvoiceRoutes from './routes/recurringInvoiceRoutes.js';
 import { initCronJobs } from './services/cronService.js';
 import { initSocketServer } from './services/socketService.js';
 
@@ -60,6 +64,10 @@ const startServer = async () => {
     app.use('/api/export', exportRoutes);
     app.use('/api/intelligence', intelligenceRoutes);
     app.use('/api/projects', projectRoutes);
+    app.use('/api/automation', automationRoutes);
+    app.use('/api/capital-assets', capitalAssetRoutes);
+    app.use('/api/tax', taxRoutes);
+    app.use('/api/recurring-invoices', recurringInvoiceRoutes);
 
     // Root route
     app.get('/', (_req: Request, res: Response) => {

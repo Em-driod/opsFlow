@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import Payroll from '../models/Payroll.js';
+import Transaction from '../models/Transaction.js';
 import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
+import { emitToBusiness } from '../services/socketService.js';
 
 /**
  * @desc    Create a new payroll entry with a manual name
@@ -77,27 +79,44 @@ export const getPayrollById = async (req: Request, res: Response) => {
  */
 export const updatePayroll = async (req: Request, res: Response) => {
   try {
+    const user = req.user as any;
     const payroll = await Payroll.findOne({
       _id: req.params.id,
-      businessId: (req.user as any).businessId,
+      businessId: user.businessId,
     });
 
-    if (payroll) {
-      if (req.body.staffName) payroll.staffName = req.body.staffName;
-      if (req.body.salary) payroll.salary = req.body.salary;
-      if (req.body.payday) payroll.payday = req.body.payday;
-      if (req.body.status) payroll.status = req.body.status;
-
-      const updatedPayroll = await payroll.save();
-
-      // 🔄 Auto-sync to Google Sheets + fire webhook
-      enqueue({ type: 'payroll', action: 'updated', data: updatedPayroll.toObject(), businessId: String((req.user as any).businessId) });
-      fire('payroll.updated', String((req.user as any).businessId), updatedPayroll.toObject());
-
-      res.json(updatedPayroll);
-    } else {
-      res.status(404).json({ message: 'Payroll not found' });
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll not found' });
     }
+
+    if (req.body.staffName) payroll.staffName = req.body.staffName;
+    if (req.body.salary) payroll.salary = req.body.salary;
+    if (req.body.payday) payroll.payday = req.body.payday;
+
+    // When transitioning to paid for the first time, create the expense transaction
+    // so payroll costs appear in the financial model.
+    if (req.body.status === 'paid' && payroll.status !== 'paid' && !payroll.transactionId) {
+      const expenseTransaction = await Transaction.create({
+        businessId: user.businessId,
+        amount: payroll.salary,
+        type: 'expense',
+        category: 'Payroll',
+        description: `Salary payment — ${payroll.staffName}`,
+        recordedBy: user._id,
+        source: 'manual',
+      });
+      payroll.transactionId = expenseTransaction._id as any;
+      emitToBusiness(String(user.businessId), 'data_updated', { type: 'transaction', action: 'created' });
+    }
+
+    if (req.body.status) payroll.status = req.body.status;
+
+    const updatedPayroll = await payroll.save();
+
+    enqueue({ type: 'payroll', action: 'updated', data: updatedPayroll.toObject(), businessId: String(user.businessId) });
+    fire('payroll.updated', String(user.businessId), updatedPayroll.toObject());
+
+    res.json(updatedPayroll);
   } catch (error) {
     res.status(500).json({ message: 'Update failed', error: (error as Error).message });
   }
@@ -130,13 +149,12 @@ export const deletePayroll = async (req: Request, res: Response) => {
  */
 export const processPayrolls = async (req: Request, res: Response) => {
   try {
-    const businessId = (req.user as any).businessId;
+    const user = req.user as any;
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
-    // Find all pending payrolls for this business due today or earlier
     const pendingPayrolls = await Payroll.find({
-      businessId,
+      businessId: user.businessId,
       status: 'pending',
       payday: { $lte: today },
     });
@@ -145,11 +163,25 @@ export const processPayrolls = async (req: Request, res: Response) => {
       return res.json({ message: 'No pending payrolls to process.' });
     }
 
-    // Update all found records to 'paid'
-    await Payroll.updateMany(
-      { _id: { $in: pendingPayrolls.map((p) => p._id) } },
-      { $set: { status: 'paid' } },
-    );
+    // Process one by one so each creates its expense transaction.
+    for (const payroll of pendingPayrolls) {
+      if (!payroll.transactionId) {
+        const expenseTransaction = await Transaction.create({
+          businessId: user.businessId,
+          amount: payroll.salary,
+          type: 'expense',
+          category: 'Payroll',
+          description: `Salary payment — ${payroll.staffName}`,
+          recordedBy: user._id,
+          source: 'manual',
+        });
+        payroll.transactionId = expenseTransaction._id as any;
+      }
+      payroll.status = 'paid';
+      await payroll.save();
+    }
+
+    emitToBusiness(String(user.businessId), 'data_updated', { type: 'transaction', action: 'created' });
 
     res.json({ message: `${pendingPayrolls.length} payrolls marked as paid.` });
   } catch (error) {

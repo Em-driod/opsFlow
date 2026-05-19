@@ -11,7 +11,9 @@ export interface IScannedTransaction extends Document {
     type: 'income' | 'expense' | 'unassigned';
     category: string;
     description?: string;
-    status: 'pending' | 'committed' | 'edited';
+    status: 'pending' | 'committed' | 'edited' | 'auto_committed';
+    confidence?: number;
+    autoRuleId?: mongoose.Types.ObjectId;
   }>;
 }
 
@@ -28,7 +30,9 @@ const ScannedTransactionSchema: Schema = new Schema(
         type: { type: String, enum: ['income', 'expense', 'unassigned'], default: 'unassigned' },
         category: { type: String },
         description: { type: String },
-        status: { type: String, enum: ['pending', 'committed', 'edited'], default: 'pending' },
+        status: { type: String, enum: ['pending', 'committed', 'edited', 'auto_committed'], default: 'pending' },
+        confidence: { type: Number },
+        autoRuleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutoCommitRule' },
       },
     ],
   },

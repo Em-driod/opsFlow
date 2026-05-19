@@ -2,6 +2,10 @@ import type { Request, Response } from 'express';
 import ScannedTransaction from '../models/ScannedTransaction.js';
 import Transaction from '../models/Transaction.js';
 import { createNotification } from './notificationController.js';
+import { predictCategory, learnTransactionCategory } from '../services/learningService.js';
+import { loadRules, evaluateItemWithRules, recordRuleHit } from '../services/autoCommitEngine.js';
+import { emitToBusiness } from '../services/socketService.js';
+import { inferTaxCategory } from '../services/nigerianTax.js';
 
 // @desc    Create a scanned transaction from OCR data
 // @route   POST /api/scanned-transactions
@@ -15,20 +19,93 @@ export const createScannedTransaction = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'No raw text provided for scan.' });
     }
 
+    // 1. Duplicate Detection (Basic check on recordedBy + filename + rawText length within last 24h)
+    const yesterday = new Date();
+    yesterday.setHours(yesterday.getHours() - 24);
+    const possibleDuplicate = await ScannedTransaction.findOne({
+      businessId: user.businessId,
+      originalFileName,
+      createdAt: { $gte: yesterday },
+      rawText: text // Check if text is identical
+    });
+
+    if (possibleDuplicate) {
+      return res.status(409).json({ 
+        message: 'Duplicate detected. This document was recently scanned.',
+        duplicateId: possibleDuplicate._id 
+      });
+    }
+
+    // 2. Auto-Categorization for parsed items
+    const enhancedTransactions = await Promise.all((transactions || []).map(async (item: any) => {
+      if (!item.category || item.category === 'Uncategorized') {
+        const predicted = await predictCategory(user.businessId, item.description);
+        if (predicted) {
+          return { ...item, category: predicted, confidence: 0.9 }; // Mark as high confidence if predicted
+        }
+      }
+      return { ...item, confidence: typeof item.confidence === 'number' ? item.confidence : 0.7 };
+    }));
+
+    // 3. Auto-Commit Rules: try to clear items off the review queue when rules match
+    const rules = await loadRules(String(user.businessId));
+    let autoCommittedCount = 0;
+    const finalParsedDetails: any[] = [];
+    for (const item of enhancedTransactions) {
+      const decision = evaluateItemWithRules(item, rules);
+      if (decision.autoCommit && decision.rule) {
+        const finalCategory = decision.finalCategory || item.category || 'Uncategorized';
+        const finalType: 'income' | 'expense' = item.type === 'unassigned' ? 'expense' : item.type;
+        const finalTaxCategory = inferTaxCategory(finalCategory || item.description, finalType) || undefined;
+        await Transaction.create({
+          businessId: user.businessId,
+          amount: item.amount,
+          type: finalType,
+          category: finalCategory,
+          description: item.description,
+          recordedBy: user._id,
+          source: 'ocr_scan',
+          ...(finalTaxCategory ? { taxCategory: finalTaxCategory } : {}),
+        });
+        await recordRuleHit(String(decision.rule._id));
+        autoCommittedCount++;
+        finalParsedDetails.push({
+          ...item,
+          category: finalCategory,
+          status: 'auto_committed',
+          autoRuleId: decision.rule._id,
+        });
+      } else {
+        finalParsedDetails.push({ ...item, status: 'pending' });
+      }
+    }
+
+    const allAuto = finalParsedDetails.length > 0 && finalParsedDetails.every((it) => it.status === 'auto_committed');
+
     const scannedTx = await ScannedTransaction.create({
       businessId: user.businessId,
       rawText: text,
       originalFileName,
       recordedBy: user._id,
-      status: 'pending',
-      parsedDetails: transactions || [], // Save the array of parsed items
+      status: allAuto ? 'processed' : 'pending',
+      parsedDetails: finalParsedDetails,
     });
+
+    if (autoCommittedCount > 0) {
+      emitToBusiness(String(user.businessId), 'data_updated', { type: 'transaction', action: 'auto_committed' });
+    }
+
+    const reviewCount = finalParsedDetails.length - autoCommittedCount;
+    const noteParts: string[] = [];
+    if (autoCommittedCount > 0) noteParts.push(`${autoCommittedCount} auto-committed`);
+    if (reviewCount > 0) noteParts.push(`${reviewCount} awaiting review`);
+    const note = noteParts.length > 0 ? noteParts.join(', ') : 'no items detected';
 
     await createNotification({
       businessId: user.businessId,
       userId: user._id,
-      message: `Successfully saved a new scanned document for review.`,
-      link: `/scanned-transactions`,
+      message: `Scanned document processed: ${note}.`,
+      link: autoCommittedCount > 0 && reviewCount === 0 ? `/transactions` : `/scanned-transactions`,
     });
 
     res.status(201).json(scannedTx);

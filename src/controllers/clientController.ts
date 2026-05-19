@@ -3,6 +3,7 @@ import Client from '../models/Client.js';
 import Business from '../models/Business.js';
 import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
+import { emitToBusiness } from '../services/socketService.js';
 
 // @desc    Create a new client
 // @route   POST /api/clients
@@ -20,9 +21,9 @@ export const createClient = async (req: Request, res: Response) => {
       businessId: (req.user as any).businessId,
     });
 
-    // 🔄 Auto-sync to Google Sheets + fire webhook
     enqueue({ type: 'client', action: 'created', data: client.toObject(), businessId: String((req.user as any).businessId) });
     fire('client.created', String((req.user as any).businessId), client.toObject());
+    emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'created' });
 
     res.status(201).json(client);
   } catch (error) {
@@ -82,9 +83,9 @@ export const updateClient = async (req: Request, res: Response) => {
 
       const updatedClient = await client.save();
 
-      // 🔄 Auto-sync to Google Sheets + fire webhook
       enqueue({ type: 'client', action: 'updated', data: updatedClient.toObject(), businessId: String((req.user as any).businessId) });
       fire('client.updated', String((req.user as any).businessId), updatedClient.toObject());
+      emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'updated' });
 
       res.json(updatedClient);
     } else {
@@ -107,6 +108,7 @@ export const deleteClient = async (req: Request, res: Response) => {
     }); // Filter by businessId
     if (client) {
       await client.deleteOne();
+      emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'deleted' });
       res.json({ message: 'Client removed' });
     } else {
       res.status(404).json({ message: 'Client not found' });

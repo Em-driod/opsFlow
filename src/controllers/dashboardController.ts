@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import Transaction from '../models/Transaction.js';
 import Client from '../models/Client.js';
+import Invoice from '../models/Invoice.js';
+import ScannedTransaction from '../models/ScannedTransaction.js';
 import mongoose from 'mongoose';
 
 /**
@@ -65,11 +67,35 @@ export const getKpis = async (req: Request, res: Response) => {
 
     const totalClients = await Client.countDocuments({ businessId, status: 'active' });
 
+    // Build daily new-client trend for the current month
+    const newClientsPerDay = await Client.aggregate([
+      {
+        $match: {
+          businessId: new mongoose.Types.ObjectId(businessId),
+          createdAt: { $gte: startOfMonth },
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const clientTrend: number[] = Array(dayOfMonth).fill(0);
+    newClientsPerDay.forEach((c) => {
+      const dayIndex = Number(c._id.split('-')[2]) - 1;
+      if (dayIndex >= 0 && dayIndex < dayOfMonth) {
+        clientTrend[dayIndex] = c.count;
+      }
+    });
+
     res.status(200).json({
       totalIncome: { value: totalIncome, trend: incomeTrend },
       totalExpenses: { value: totalExpenses, trend: expenseTrend },
       netProfit: { value: netProfit, trend: netProfitTrend },
-      totalClients: { value: totalClients, trend: [totalClients - 2, totalClients - 1, totalClients, totalClients, totalClients, totalClients, totalClients] } // mock trend
+      totalClients: { value: totalClients, trend: clientTrend },
     });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
@@ -165,6 +191,33 @@ export const getChartData = async (req: Request, res: Response) => {
     ]);
 
     res.status(200).json(chartData);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: (error as Error).message });
+  }
+};
+
+/**
+ * @desc    Returns which onboarding steps the business has completed
+ * @route   GET /api/dashboard/onboarding-status
+ * @access  Private
+ */
+export const getOnboardingStatus = async (req: Request, res: Response) => {
+  try {
+    const businessId = new mongoose.Types.ObjectId((req.user as any).businessId);
+
+    const [hasClient, hasTransaction, hasInvoice, hasScannedDoc] = await Promise.all([
+      Client.exists({ businessId }),
+      Transaction.exists({ businessId }),
+      Invoice.exists({ businessId }),
+      ScannedTransaction.exists({ businessId }),
+    ]);
+
+    res.status(200).json({
+      hasClient: !!hasClient,
+      hasTransaction: !!hasTransaction,
+      hasInvoice: !!hasInvoice,
+      hasScannedDoc: !!hasScannedDoc,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
   }

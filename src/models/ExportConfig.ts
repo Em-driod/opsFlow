@@ -30,6 +30,9 @@ export interface IExportConfig extends Document {
   lastFullSyncAt?: Date;
   syncEvents: any[];
   webhooks: any[];
+  googleAccessToken?: string;
+  googleRefreshToken?: string;
+  googleTokenExpiry?: number;
 }
 
 const ExportConfigSchema: Schema = new Schema(
@@ -47,6 +50,9 @@ const ExportConfigSchema: Schema = new Schema(
     lastFullSyncAt: { type: Date },
     syncEvents: { type: [SyncEventSchema], default: [] },
     webhooks: { type: [WebhookSchema], default: [] },
+    googleAccessToken: { type: String },
+    googleRefreshToken: { type: String },
+    googleTokenExpiry: { type: Number },
   },
   { timestamps: true },
 );

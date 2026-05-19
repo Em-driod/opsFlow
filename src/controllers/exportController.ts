@@ -7,8 +7,9 @@ import Transaction from '../models/Transaction.js';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import Payroll from '../models/Payroll.js';
+import User from '../models/User.js';
+import jwt from 'jsonwebtoken';
 import {
-  validateSheetAccess,
   initializeSheetTabs,
   batchAppendRows,
   writeSummaryRow,
@@ -17,9 +18,11 @@ import {
   invoiceToRow,
   payrollToRow,
   SHEET_TABS,
+  createSpreadsheet,
 } from '../services/googleSheetsService.js';
 import { getQueueStats } from '../services/exportQueueService.js';
 import crypto from 'crypto';
+import axios from 'axios';
 
 // Helper — get or create config for this business
 async function getOrCreateConfig(businessId: string) {
@@ -30,53 +33,99 @@ async function getOrCreateConfig(businessId: string) {
   return config;
 }
 
-// @desc   Connect a Google Sheet by URL or ID
-// @route  POST /api/export/connect
-// @access Private
-export const connectSheet = async (req: Request, res: Response) => {
+// @desc   Start Google OAuth2 Consent Flow
+// @route  GET /api/export/google/auth
+// @access Public (token via query)
+export const googleAuthRedirect = async (req: Request, res: Response) => {
   try {
-    const user = req.user as any;
-    const { sheetUrl } = req.body;
+    const token = req.query.token as string;
+    if (!token) return res.status(401).json({ message: 'No token provided' });
 
-    if (!sheetUrl) {
-      return res.status(400).json({ message: 'sheetUrl is required' });
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ message: 'JWT_SECRET missing' });
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, secret);
+    } catch (e) {
+      return res.status(401).json({ message: 'Invalid token' });
     }
 
-    // Extract sheet ID from URL
-    const match = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    const sheetId = match ? match[1] : sheetUrl.trim();
+    const user = await User.findById(decoded.id);
+    if (!user || !user.businessId) return res.status(401).json({ message: 'User not found or missing businessId' });
 
-    if (!sheetId) {
-      return res.status(400).json({ message: 'Could not extract Sheet ID from the provided URL' });
-    }
+    const businessId = String(user.businessId);
 
-    // Validate access
-    const { valid, title, error } = await validateSheetAccess(sheetId);
-    if (!valid) {
-      return res.status(400).json({
-        message: 'Could not access the spreadsheet. Make sure you have shared it with the service account.',
-        error,
-      });
-    }
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/export/google/callback';
 
-    // Initialize all tabs
-    await initializeSheetTabs(sheetId);
+    if (!clientId) return res.status(500).json({ message: 'Server not configured for Google OAuth. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
 
-    // Save config
-    const config = await getOrCreateConfig(String(user.businessId));
-    config.googleSheetId = sheetId;
-    config.googleSheetUrl = sheetUrl;
-    config.sheetsConnected = true;
-    config.autoSyncEnabled = true;
-    await config.save();
+    const state = Buffer.from(businessId).toString('base64');
+    const scope = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 
-    res.status(200).json({
-      message: `✅ Successfully connected to "${title}"`,
-      sheetId,
-      sheetTitle: title,
-    });
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${state}`;
+
+    res.redirect(authUrl);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: (err as Error).message });
+  }
+};
+
+// @desc   Google OAuth2 Callback Handler
+// @route  GET /api/export/google/callback
+// @access Public (validates via state)
+export const googleAuthCallback = async (req: Request, res: Response) => {
+  try {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      return res.redirect('http://localhost:3001/automation?error=consent_denied');
+    }
+    if (!code || !state) {
+      return res.status(400).send('Missing code or state');
+    }
+
+    const businessId = Buffer.from(state as string, 'base64').toString('ascii');
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/export/google/callback';
+
+    const response = await axios.post('https://oauth2.googleapis.com/token', null, {
+      params: {
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }
+    });
+
+    const tokens = response.data;
+    
+    const config = await getOrCreateConfig(businessId);
+    config.googleAccessToken = tokens.access_token;
+    config.googleRefreshToken = tokens.refresh_token; 
+    config.googleTokenExpiry = Date.now() + (tokens.expires_in * 1000);
+    
+    await config.save(); 
+
+    const sheetId = await createSpreadsheet(businessId, `OpsFlow Financials - ${new Date().toLocaleDateString()}`);
+    await initializeSheetTabs(businessId, sheetId);
+
+    config.googleSheetId = sheetId;
+    config.googleSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+    config.sheetsConnected = true;
+    config.autoSyncEnabled = true;
+    
+    await config.save();
+
+    res.redirect('http://localhost:3001/automation?connected=true');
+
+  } catch (err: any) {
+    console.error('OAuth Callback Error:', err.response?.data || err.message);
+    res.redirect('http://localhost:3001/automation?error=server_error');
   }
 };
 
@@ -90,6 +139,9 @@ export const disconnectSheet = async (req: Request, res: Response) => {
     config.sheetsConnected = false;
     config.googleSheetId = '';
     config.googleSheetUrl = '';
+    config.googleAccessToken = '';
+    config.googleRefreshToken = '';
+    config.googleTokenExpiry = 0;
     await config.save();
     res.status(200).json({ message: 'Sheet disconnected successfully' });
   } catch (err) {
@@ -148,7 +200,7 @@ export const syncAllData = async (req: Request, res: Response) => {
     }
 
     const sheetId = config.googleSheetId;
-    const businessId = user.businessId;
+    const businessId = String(user.businessId);
 
     // Fetch all records
     const [transactions, clients, invoices, payrolls] = await Promise.all([
@@ -160,10 +212,10 @@ export const syncAllData = async (req: Request, res: Response) => {
 
     // Batch write all
     const results = await Promise.all([
-      batchAppendRows(sheetId, SHEET_TABS.TRANSACTIONS, transactions.map(transactionToRow)),
-      batchAppendRows(sheetId, SHEET_TABS.CLIENTS, clients.map(clientToRow)),
-      batchAppendRows(sheetId, SHEET_TABS.INVOICES, invoices.map(invoiceToRow)),
-      batchAppendRows(sheetId, SHEET_TABS.PAYROLL, payrolls.map(payrollToRow)),
+      batchAppendRows(businessId, sheetId, SHEET_TABS.TRANSACTIONS, transactions.map(transactionToRow)),
+      batchAppendRows(businessId, sheetId, SHEET_TABS.CLIENTS, clients.map(clientToRow)),
+      batchAppendRows(businessId, sheetId, SHEET_TABS.INVOICES, invoices.map(invoiceToRow)),
+      batchAppendRows(businessId, sheetId, SHEET_TABS.PAYROLL, payrolls.map(payrollToRow)),
     ]);
 
     config.lastFullSyncAt = new Date();
@@ -263,7 +315,7 @@ export const testWebhook = async (req: Request, res: Response) => {
     const body = JSON.stringify(testPayload);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (wh.secret) {
-      const sig = require('crypto').createHmac('sha256', wh.secret).update(body).digest('hex');
+      const sig = crypto.createHmac('sha256', wh.secret).update(body).digest('hex');
       headers['X-OpsFlow-Signature'] = `sha256=${sig}`;
     }
 
@@ -285,7 +337,7 @@ export const writeDailySummary = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'No sheet connected' });
     }
 
-    const businessId = user.businessId;
+    const businessId = String(user.businessId);
     const [incomeAgg, expenseAgg, clients, invoices] = await Promise.all([
       Transaction.aggregate([{ $match: { businessId, type: 'income' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
       Transaction.aggregate([{ $match: { businessId, type: 'expense' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
@@ -296,7 +348,7 @@ export const writeDailySummary = async (req: Request, res: Response) => {
     const totalIncome = incomeAgg[0]?.total ?? 0;
     const totalExpenses = expenseAgg[0]?.total ?? 0;
 
-    await writeSummaryRow(config.googleSheetId, {
+    await writeSummaryRow(businessId, config.googleSheetId, {
       date: new Date().toLocaleDateString(),
       totalIncome,
       totalExpenses,
