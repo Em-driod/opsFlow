@@ -213,7 +213,7 @@ export const getInvoices = async (req: Request, res: Response) => {
       // For now, we'll assume all invoices are visible to all business users
       // In a real system, you might want to add a 'createdBy' field to invoices
     })
-      .populate('clientId', 'name')
+      .populate('clientId', 'name email phone')
       .sort({ createdAt: -1 });
     res.status(200).json(invoices);
   } catch (error) {
@@ -372,7 +372,9 @@ export const sendInvoice = async (req: Request, res: Response) => {
     emitToBusiness(String(user.businessId), 'data_updated', { type: 'invoice', action: 'sent' });
 
     res.status(200).json({
-      message: sent ? 'Invoice sent successfully' : 'Invoice marked as sent (email delivery unavailable — check SMTP config)',
+      message: sent
+        ? `Invoice emailed to ${email} successfully`
+        : 'Email delivery failed — check your SMTP settings on the server. Invoice was still marked as sent.',
       emailSent: sent,
       publicLink,
     });
@@ -404,13 +406,22 @@ export const getWhatsAppLink = async (req: Request, res: Response) => {
     const publicLink = `${frontendUrl}/#/invoice/${invoice._id}`;
     const dueDate = new Date(invoice.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
+    const formattedAmount = new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 0,
+    }).format(invoice.total);
+
     const message =
-      `Hi ${clientName},\n\n` +
-      `Please find Invoice *${invoice.invoiceNumber}* from *${business?.name || 'us'}*.\n\n` +
-      `*Amount Due:* ${invoice.total.toLocaleString()}\n` +
-      `*Due Date:* ${dueDate}\n\n` +
-      `View and pay securely here:\n${publicLink}\n\n` +
-      `Thank you for your business! 🙏`;
+      `Hello ${clientName} 👋\n\n` +
+      `You have a new invoice from *${business?.name || 'us'}*.\n\n` +
+      `📄 *Invoice:* ${invoice.invoiceNumber}\n` +
+      `💰 *Amount Due:* ${formattedAmount}\n` +
+      `📅 *Due Date:* ${dueDate}\n\n` +
+      `Click the link below to view your invoice and pay securely online:\n` +
+      `👉 ${publicLink}\n\n` +
+      `Reply to this message if you have any questions.\n\n` +
+      `Thank you! 🙏\n*${business?.name || 'us'}*`;
 
     const cleanPhone = phone.replace(/\D/g, '');
     const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;

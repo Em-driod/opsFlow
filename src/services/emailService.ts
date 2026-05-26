@@ -172,15 +172,22 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
 </html>`;
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"${data.businessName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      replyTo: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: data.recipientEmail,
-      subject: `Invoice ${data.invoiceNumber} from ${data.businessName} — ${formattedTotal} due ${formattedDue}`,
+      subject: `Invoice ${data.invoiceNumber} — ${formattedTotal} due ${formattedDue} | ${data.businessName}`,
       html,
+      headers: {
+        'X-Priority': '1',
+        'X-Mailer': 'OpsFlow',
+      },
     });
+    console.log(`[Email] Sent invoice ${data.invoiceNumber} to ${data.recipientEmail} — messageId: ${info.messageId}`);
     return true;
-  } catch (err) {
-    console.error('[Email] Failed to send invoice email:', err);
+  } catch (err: any) {
+    console.error('[Email] FAILED to send invoice email:', err?.message || err);
+    console.error('[Email] SMTP config — host:', process.env.SMTP_HOST, 'port:', process.env.SMTP_PORT, 'user:', process.env.SMTP_USER, 'pass set:', !!process.env.SMTP_PASS);
     return false;
   }
 };
