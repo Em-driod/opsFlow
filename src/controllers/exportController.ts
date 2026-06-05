@@ -82,7 +82,7 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     if (error) {
-      return res.redirect(`${frontendUrl}/automation?error=consent_denied`);
+      return res.redirect(`${frontendUrl}/#/automation?error=consent_denied`);
     }
     if (!code || !state) {
       return res.status(400).send('Missing code or state');
@@ -123,12 +123,12 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
     
     await config.save();
 
-    res.redirect(`${frontendUrl}/automation?connected=true`);
+    res.redirect(`${frontendUrl}/#/automation?connected=true`);
 
   } catch (err: any) {
     console.error('OAuth Callback Error:', err.response?.data || err.message);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    res.redirect(`${frontendUrl}/automation?error=server_error`);
+    res.redirect(`${frontendUrl}/#/automation?error=server_error`);
   }
 };
 
