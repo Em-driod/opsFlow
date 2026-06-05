@@ -34,7 +34,7 @@ export const getFinancialSummary = async (req: Request, res: Response) => {
       {
         $match: {
           businessId: new mongoose.Types.ObjectId(businessId),
-          date: { $gte: start, $lte: end },
+          createdAt: { $gte: start, $lte: end },
         },
       },
     ];
@@ -153,7 +153,7 @@ export const getDetailedTransactions = async (req: Request, res: Response) => {
 
     let transactionsQuery = Transaction.find({
       businessId: new mongoose.Types.ObjectId(businessId),
-      date: { $gte: start, $lte: end },
+      createdAt: { $gte: start, $lte: end },
     });
 
     if (groupBy === 'client') {
