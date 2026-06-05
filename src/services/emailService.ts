@@ -1,19 +1,4 @@
-import nodemailer from 'nodemailer';
-
-const createTransporter = () => {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    return null;
-  }
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
-};
+import { Resend } from 'resend';
 
 interface InvoiceEmailData {
   invoiceNumber: string;
@@ -31,18 +16,21 @@ interface InvoiceEmailData {
 }
 
 export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean> => {
-  const transporter = createTransporter();
-  if (!transporter) {
-    console.warn('[Email] SMTP not configured — skipping email send.');
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[Email] RESEND_API_KEY not set — skipping email send.');
     return false;
   }
 
-  const formattedTotal = new Intl.NumberFormat('en-US', {
+  const resend = new Resend(apiKey);
+
+  const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency',
-    currency: data.currency || 'USD',
+    currency: data.currency === 'NGN' ? 'NGN' : (data.currency || 'NGN'),
+    minimumFractionDigits: 0,
   }).format(data.total);
 
-  const formattedDue = new Date(data.dueDate).toLocaleDateString('en-US', {
+  const formattedDue = new Date(data.dueDate).toLocaleDateString('en-GB', {
     year: 'numeric', month: 'long', day: 'numeric',
   });
 
@@ -50,8 +38,8 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#334155;">${item.description}</td>
       <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#334155;text-align:center;">${item.quantity}</td>
-      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#334155;text-align:right;">${item.unitPrice.toLocaleString()}</td>
-      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:700;color:#0f172a;text-align:right;">${item.total.toLocaleString()}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#334155;text-align:right;">${item.unitPrice.toLocaleString('en-NG')}</td>
+      <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:700;color:#0f172a;text-align:right;">${item.total.toLocaleString('en-NG')}</td>
     </tr>
   `).join('');
 
@@ -129,11 +117,11 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
                   <table width="100%">
                     <tr>
                       <td style="padding:6px 0;font-size:13px;color:#64748b;">Subtotal</td>
-                      <td style="padding:6px 0;font-size:13px;color:#334155;text-align:right;">${data.subtotal.toLocaleString()}</td>
+                      <td style="padding:6px 0;font-size:13px;color:#334155;text-align:right;">${data.subtotal.toLocaleString('en-NG')}</td>
                     </tr>
                     ${data.tax > 0 ? `<tr>
-                      <td style="padding:6px 0;font-size:13px;color:#64748b;">Tax</td>
-                      <td style="padding:6px 0;font-size:13px;color:#334155;text-align:right;">${data.tax.toLocaleString()}</td>
+                      <td style="padding:6px 0;font-size:13px;color:#64748b;">Tax (${data.tax}%)</td>
+                      <td style="padding:6px 0;font-size:13px;color:#334155;text-align:right;">${(data.subtotal * data.tax / 100).toLocaleString('en-NG')}</td>
                     </tr>` : ''}
                     <tr>
                       <td style="padding:12px 0 4px;font-size:15px;font-weight:800;color:#0f172a;border-top:2px solid #f1f5f9;">Total Due</td>
@@ -172,22 +160,22 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
 </html>`;
 
   try {
-    const info = await transporter.sendMail({
-      from: `"${data.businessName}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-      replyTo: process.env.SMTP_FROM || process.env.SMTP_USER,
+    const { data: result, error } = await resend.emails.send({
+      from: `${data.businessName} <onboarding@resend.dev>`,
       to: data.recipientEmail,
       subject: `Invoice ${data.invoiceNumber} — ${formattedTotal} due ${formattedDue} | ${data.businessName}`,
       html,
-      headers: {
-        'X-Priority': '1',
-        'X-Mailer': 'OpsFlow',
-      },
     });
-    console.log(`[Email] Sent invoice ${data.invoiceNumber} to ${data.recipientEmail} — messageId: ${info.messageId}`);
+
+    if (error) {
+      console.error('[Email] Resend error:', error);
+      return false;
+    }
+
+    console.log(`[Email] Sent invoice ${data.invoiceNumber} to ${data.recipientEmail} — id: ${result?.id}`);
     return true;
   } catch (err: any) {
-    console.error('[Email] FAILED to send invoice email:', err?.message || err);
-    console.error('[Email] SMTP config — host:', process.env.SMTP_HOST, 'port:', process.env.SMTP_PORT, 'user:', process.env.SMTP_USER, 'pass set:', !!process.env.SMTP_PASS);
+    console.error('[Email] Failed to send via Resend:', err?.message || err);
     return false;
   }
 };

@@ -57,7 +57,8 @@ export const googleAuthRedirect = async (req: Request, res: Response) => {
     const businessId = String(user.businessId);
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/export/google/callback';
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5000';
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${baseUrl}/api/export/google/callback`;
 
     if (!clientId) return res.status(500).json({ message: 'Server not configured for Google OAuth. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
 
@@ -79,8 +80,9 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
   try {
     const { code, state, error } = req.query;
 
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     if (error) {
-      return res.redirect('http://localhost:3001/automation?error=consent_denied');
+      return res.redirect(`${frontendUrl}/automation?error=consent_denied`);
     }
     if (!code || !state) {
       return res.status(400).send('Missing code or state');
@@ -90,7 +92,7 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/export/google/callback';
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${frontendUrl}/api/export/google/callback`;
 
     const response = await axios.post('https://oauth2.googleapis.com/token', null, {
       params: {
@@ -121,11 +123,12 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
     
     await config.save();
 
-    res.redirect('http://localhost:3001/automation?connected=true');
+    res.redirect(`${frontendUrl}/automation?connected=true`);
 
   } catch (err: any) {
     console.error('OAuth Callback Error:', err.response?.data || err.message);
-    res.redirect('http://localhost:3001/automation?error=server_error');
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    res.redirect(`${frontendUrl}/automation?error=server_error`);
   }
 };
 
