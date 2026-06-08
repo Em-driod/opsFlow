@@ -4,6 +4,7 @@ export interface IServiceItem {
   name: string;
   description?: string;
   price?: number;
+  image?: string;
 }
 
 export interface IBusinessProfile {
@@ -35,6 +36,7 @@ const ServiceItemSchema = new Schema({
   name: { type: String, required: true },
   description: { type: String },
   price: { type: Number },
+  image: { type: String },
 }, { _id: false });
 
 const BusinessSchema: Schema = new Schema(
