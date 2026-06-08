@@ -91,7 +91,7 @@ export const updateBusinessProfile = async (req: Request, res: Response) => {
     const business = await Business.findById(req.params.id);
     if (!business) return res.status(404).json({ message: 'Business not found' });
 
-    const { tagline, description, whatsapp, email, website, instagram, location, services, isPublic } = req.body;
+    const { tagline, description, whatsapp, email, website, instagram, location, services, isPublic, coverImage, logoImage, accentColor } = req.body;
 
     // Generate slug from business name if not set
     if (!business.slug) {
@@ -114,6 +114,9 @@ export const updateBusinessProfile = async (req: Request, res: Response) => {
       location: location ?? business.profile?.location,
       services: services ?? business.profile?.services ?? [],
       isPublic: isPublic !== undefined ? isPublic : (business.profile?.isPublic ?? false),
+      coverImage: coverImage !== undefined ? coverImage : business.profile?.coverImage,
+      logoImage: logoImage !== undefined ? logoImage : business.profile?.logoImage,
+      accentColor: accentColor ?? business.profile?.accentColor ?? '#6366f1',
     };
 
     await business.save();

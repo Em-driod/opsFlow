@@ -16,6 +16,9 @@ export interface IBusinessProfile {
   location?: string;
   services: IServiceItem[];
   isPublic: boolean;
+  coverImage?: string;
+  logoImage?: string;
+  accentColor?: string;
 }
 
 export interface IBusiness extends Document {
@@ -52,6 +55,9 @@ const BusinessSchema: Schema = new Schema(
       location: { type: String },
       services: { type: [ServiceItemSchema], default: [] },
       isPublic: { type: Boolean, default: false },
+      coverImage: { type: String },
+      logoImage: { type: String },
+      accentColor: { type: String, default: '#6366f1' },
     },
   },
   { timestamps: true },
