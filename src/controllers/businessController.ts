@@ -83,6 +83,66 @@ export const deleteBusiness = async (req: Request, res: Response) => {
   }
 };
 
+// @desc    Update business public profile
+// @route   PUT /api/businesses/:id/profile
+// @access  Private
+export const updateBusinessProfile = async (req: Request, res: Response) => {
+  try {
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ message: 'Business not found' });
+
+    const { tagline, description, whatsapp, email, website, instagram, location, services, isPublic } = req.body;
+
+    // Generate slug from business name if not set
+    if (!business.slug) {
+      const base = business.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      let slug = base;
+      let i = 1;
+      while (await Business.findOne({ slug, _id: { $ne: business._id } })) {
+        slug = `${base}-${i++}`;
+      }
+      business.slug = slug;
+    }
+
+    business.profile = {
+      tagline: tagline ?? business.profile?.tagline,
+      description: description ?? business.profile?.description,
+      whatsapp: whatsapp ?? business.profile?.whatsapp,
+      email: email ?? business.profile?.email,
+      website: website ?? business.profile?.website,
+      instagram: instagram ?? business.profile?.instagram,
+      location: location ?? business.profile?.location,
+      services: services ?? business.profile?.services ?? [],
+      isPublic: isPublic !== undefined ? isPublic : (business.profile?.isPublic ?? false),
+    };
+
+    await business.save();
+    res.json(business);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error });
+  }
+};
+
+// @desc    Get public business profile by slug
+// @route   GET /api/profile/:slug
+// @access  Public
+export const getPublicProfile = async (req: Request, res: Response) => {
+  try {
+    const business = await Business.findOne({ slug: req.params.slug });
+    if (!business || !business.profile?.isPublic) {
+      return res.status(404).json({ message: 'Profile not found' });
+    }
+    res.json({
+      name: business.name,
+      slug: business.slug,
+      currency: business.currency,
+      profile: business.profile,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error });
+  }
+};
+
 // @desc    Add a user to a business
 // @route   POST /api/businesses/:id/users
 // @access  Private

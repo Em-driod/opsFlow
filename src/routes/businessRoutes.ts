@@ -6,6 +6,8 @@ import {
   updateBusiness,
   deleteBusiness,
   addUserToBusiness,
+  updateBusinessProfile,
+  getPublicProfile,
 } from '../controllers/businessController.js';
 import { protect, admin } from '../middleware/auth.js';
 
@@ -16,5 +18,9 @@ router
   .put(protect, admin, updateBusiness)
   .delete(protect, admin, deleteBusiness);
 router.route('/:id/users').post(protect, admin, addUserToBusiness);
+router.route('/:id/profile').put(protect, admin, updateBusinessProfile);
+
+// Public — no auth
+router.route('/public/:slug').get(getPublicProfile);
 
 export default router;
