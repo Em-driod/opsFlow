@@ -31,6 +31,7 @@ import proposalRoutes from './routes/proposalRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import searchRoutes from './routes/searchRoutes.js';
+import receiptRoutes from './routes/receiptRoutes.js';
 import { initCronJobs } from './services/cronService.js';
 import { initSocketServer } from './services/socketService.js';
 import rateLimit from 'express-rate-limit';
@@ -103,6 +104,7 @@ const startServer = async () => {
     app.use('/api/products', productRoutes);
     app.use('/api/budgets', budgetRoutes);
     app.use('/api/search', searchRoutes);
+    app.use('/api/receipts', receiptRoutes);
 
     // Root route
     app.get('/', (_req: Request, res: Response) => {

@@ -450,3 +450,87 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
     return false;
   }
 };
+
+export const sendIssuedReceiptEmail = async (data: {
+  recipientEmail: string;
+  payerName: string;
+  businessName: string;
+  receiptNumber: string;
+  amount: number;
+  currency: string;
+  description: string;
+  date: string;
+  publicLink: string;
+}): Promise<boolean> => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) { console.warn('[Email] RESEND_API_KEY not set'); return false; }
+  const resend = new Resend(apiKey);
+
+  const formattedAmount = new Intl.NumberFormat('en-NG', {
+    style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
+  }).format(data.amount);
+  const formattedDate = new Date(data.date).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+  const sBusinessName = esc(data.businessName);
+  const sPayerName = esc(data.payerName);
+  const sDescription = esc(data.description);
+  const sReceiptNumber = esc(data.receiptNumber);
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0fdf4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 16px;"><tr><td align="center">
+  <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+    <tr><td style="background:linear-gradient(135deg,#059669,#10b981);padding:40px 40px 32px;">
+      <table width="100%"><tr>
+        <td><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Receipt from</p>
+          <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${sBusinessName}</h1></td>
+        <td align="right"><div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:12px 20px;display:inline-block;">
+          <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Receipt No.</p>
+          <p style="margin:4px 0 0;font-size:18px;font-weight:900;color:#ffffff;">${sReceiptNumber}</p>
+        </div></td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:32px 40px 0;">
+      <table width="100%"><tr>
+        <td><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Received from</p>
+          <p style="margin:0;font-size:16px;font-weight:700;color:#0f172a;">${sPayerName}</p></td>
+        <td align="right"><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Date</p>
+          <p style="margin:0;font-size:16px;font-weight:700;color:#0f172a;">${formattedDate}</p></td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:24px 40px 0;">
+      <div style="background:#f0fdf4;border-radius:12px;padding:24px;">
+        <p style="margin:0 0 8px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#64748b;">Payment For</p>
+        <p style="margin:0;font-size:15px;color:#0f172a;line-height:1.5;">${sDescription}</p>
+      </div>
+    </td></tr>
+    <tr><td style="padding:24px 40px 0;">
+      <div style="background:linear-gradient(135deg,#059669,#10b981);border-radius:12px;padding:24px;text-align:center;">
+        <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Amount Received</p>
+        <p style="margin:0;font-size:36px;font-weight:900;color:#ffffff;">${formattedAmount}</p>
+      </div>
+    </td></tr>
+    <tr><td style="padding:32px 40px 40px;" align="center">
+      <a href="${data.publicLink}" style="display:inline-block;background:linear-gradient(135deg,#059669,#10b981);color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;text-transform:uppercase;">
+        View Receipt
+      </a>
+      <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;">Or copy: <a href="${data.publicLink}" style="color:#059669;word-break:break-all;">${data.publicLink}</a></p>
+    </td></tr>
+    <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#059669;">OpsFlow</strong></p>
+    </td></tr>
+  </table></td></tr></table>
+</body></html>`;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: `${data.businessName} <onboarding@resend.dev>`,
+      to: data.recipientEmail,
+      subject: `Payment Receipt ${data.receiptNumber} — ${formattedAmount} | ${data.businessName}`,
+      html,
+    });
+    if (error) { console.error('[Email] Receipt issue error:', error); return false; }
+    return true;
+  } catch (err: any) {
+    console.error('[Email] Receipt email failed:', err?.message); return false;
+  }
+};
