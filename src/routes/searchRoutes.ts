@@ -4,6 +4,6 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get('/', protect, globalSearch);
+router.get('/', protect, globalSearch as express.RequestHandler);
 
 export default router;

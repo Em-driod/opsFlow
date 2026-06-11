@@ -1,20 +1,16 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 
-interface AuthRequest extends Request {
-  user?: { _id: string; businessId: string };
-}
-
-export const globalSearch = async (req: AuthRequest, res: Response) => {
+export const globalSearch = async (req: Request, res: Response) => {
   try {
     const q = ((req.query.q as string) || '').trim();
     if (!q || q.length < 2) {
       return res.json({ clients: [], invoices: [], transactions: [] });
     }
 
-    const businessId = req.user!.businessId;
+    const businessId = (req as any).user.businessId;
     const regex = new RegExp(q, 'i');
     const limit = 5;
 

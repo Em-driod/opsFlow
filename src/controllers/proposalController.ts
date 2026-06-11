@@ -149,7 +149,7 @@ export const convertToInvoice = async (req: Request, res: Response) => {
       { $inc: { value: 1 } },
       { new: true, upsert: true },
     );
-    const invoiceNumber = `INV-${String(counter.value).padStart(4, '0')}`;
+    const invoiceNumber = `INV-${String((counter as any).value ?? 1).padStart(4, '0')}`;
 
     const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : (() => {
       const d = new Date(); d.setDate(d.getDate() + 14); return d;
