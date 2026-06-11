@@ -234,19 +234,25 @@ export const createTransaction = async (req: Request, res: Response) => {
 // @access  Private
 export const getTransactions = async (req: Request, res: Response) => {
   try {
-    const { clientId, projectId } = req.query;
+    const { clientId, projectId, page, limit: limitQ, search } = req.query;
     const user = req.user as any;
-    const filter: any = {
-      businessId: user.businessId,
-    };
-    if (clientId) {
-      filter.clientId = clientId;
+    const filter: any = { businessId: user.businessId };
+    if (clientId) filter.clientId = clientId;
+    if (projectId) filter.projectId = projectId;
+    if (search) {
+      filter.description = { $regex: String(search), $options: 'i' };
     }
-    if (projectId) {
-      filter.projectId = projectId;
-    }
-    const transactions = await Transaction.find(filter).populate('recordedBy', 'name');
-    res.json(transactions);
+
+    const pageNum = Math.max(1, parseInt(String(page || '1')));
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(limitQ || '50'))));
+    const skip = (pageNum - 1) * pageSize;
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(filter).populate('recordedBy', 'name').sort({ createdAt: -1 }).skip(skip).limit(pageSize),
+      Transaction.countDocuments(filter),
+    ]);
+
+    res.json({ data: transactions, total, page: pageNum, pages: Math.ceil(total / pageSize) });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: (error as Error).message });
     console.error('Error fetching transactions:', error);
@@ -298,6 +304,7 @@ export const updateTransaction = async (req: Request, res: Response) => {
       }
       if (typeof req.body.vatable === 'boolean') transaction.vatable = req.body.vatable;
       if (typeof req.body.vatAmount === 'number') transaction.vatAmount = req.body.vatAmount;
+      if (req.body.receiptImage !== undefined) transaction.receiptImage = req.body.receiptImage || undefined;
 
       const updatedTransaction = await transaction.save();
 

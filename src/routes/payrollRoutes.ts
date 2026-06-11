@@ -7,6 +7,8 @@ import {
   updatePayroll,
   deletePayroll,
   processPayrolls,
+  generatePayslip,
+  getPublicPayslip,
 } from '../controllers/payrollController.js';
 import { protect, admin } from '../middleware/auth.js';
 
@@ -23,5 +25,10 @@ router
   .get(protect, getPayrollById)
   .put(protect, admin, updatePayroll)
   .delete(protect, admin, deletePayroll);
+
+router.post('/:id/payslip', protect, admin, generatePayslip);
+
+// Public — no auth
+router.get('/payslip/:token', getPublicPayslip);
 
 export default router;

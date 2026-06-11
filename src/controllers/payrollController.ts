@@ -1,9 +1,11 @@
 import type { Request, Response } from 'express';
 import Payroll from '../models/Payroll.js';
 import Transaction from '../models/Transaction.js';
+import Business from '../models/Business.js';
 import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
 import { emitToBusiness } from '../services/socketService.js';
+import crypto from 'crypto';
 
 /**
  * @desc    Create a new payroll entry with a manual name
@@ -11,11 +13,14 @@ import { emitToBusiness } from '../services/socketService.js';
  */
 export const createPayroll = async (req: Request, res: Response) => {
   try {
-    const { staffName, salary, payday } = req.body;
+    const { staffName, salary, payday, deductions, bonus, note } = req.body;
 
     if (!staffName) {
       return res.status(400).json({ message: 'Employee name (staffName) is required' });
     }
+
+    const paydayDate = payday ? new Date(payday) : new Date();
+    const payPeriod = `${paydayDate.getFullYear()}-${String(paydayDate.getMonth() + 1).padStart(2, '0')}`;
 
     const payroll = await Payroll.create({
       businessId: (req.user as any).businessId,
@@ -23,6 +28,10 @@ export const createPayroll = async (req: Request, res: Response) => {
       salary,
       payday,
       status: 'pending',
+      deductions: deductions ?? 0,
+      bonus: bonus ?? 0,
+      note: note || undefined,
+      payPeriod,
     });
 
     // 🔄 Auto-sync to Google Sheets + fire webhook
@@ -186,5 +195,52 @@ export const processPayrolls = async (req: Request, res: Response) => {
     res.json({ message: `${pendingPayrolls.length} payrolls marked as paid.` });
   } catch (error) {
     res.status(500).json({ message: 'Processing failed', error: (error as Error).message });
+  }
+};
+
+// POST /api/payrolls/:id/payslip — generate (or return existing) payslip token
+export const generatePayslip = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as any;
+    const payroll = await Payroll.findOne({ _id: req.params.id, businessId: user.businessId });
+    if (!payroll) return res.status(404).json({ message: 'Payroll not found' });
+
+    if (!payroll.payslipToken) {
+      payroll.payslipToken = crypto.randomBytes(20).toString('hex');
+      await payroll.save();
+    }
+
+    res.json({ token: payroll.payslipToken });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to generate payslip' });
+  }
+};
+
+// GET /api/payrolls/payslip/:token — public, no auth
+export const getPublicPayslip = async (req: Request, res: Response) => {
+  try {
+    const payroll = await Payroll.findOne({ payslipToken: req.params.token })
+      .populate('businessId', 'name currency profile');
+    if (!payroll) return res.status(404).json({ message: 'Payslip not found' });
+
+    const biz = payroll.businessId as any;
+    res.json({
+      staffName: payroll.staffName,
+      salary: payroll.salary,
+      deductions: payroll.deductions || 0,
+      bonus: payroll.bonus || 0,
+      netPay: payroll.salary - (payroll.deductions || 0) + (payroll.bonus || 0),
+      payday: payroll.payday,
+      status: payroll.status,
+      note: payroll.note,
+      business: {
+        name: biz?.name,
+        currency: biz?.currency || 'NGN',
+        logoImage: biz?.profile?.logoImage,
+        accentColor: biz?.profile?.accentColor,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch payslip' });
   }
 };

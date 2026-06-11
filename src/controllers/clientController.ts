@@ -1,9 +1,12 @@
 import type { Request, Response } from 'express';
 import Client from '../models/Client.js';
 import Business from '../models/Business.js';
+import Invoice from '../models/Invoice.js';
+import Proposal from '../models/Proposal.js';
 import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
 import { emitToBusiness } from '../services/socketService.js';
+import crypto from 'crypto';
 
 // @desc    Create a new client
 // @route   POST /api/clients
@@ -106,15 +109,73 @@ export const deleteClient = async (req: Request, res: Response) => {
       _id: req.params.id,
       businessId: (req.user as any).businessId,
     }); // Filter by businessId
-    if (client) {
-      await client.deleteOne();
-      emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'deleted' });
-      res.json({ message: 'Client removed' });
-    } else {
-      res.status(404).json({ message: 'Client not found' });
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+
+    const [invoiceCount, proposalCount] = await Promise.all([
+      Invoice.countDocuments({ clientId: client._id }),
+      Proposal.countDocuments({ clientId: client._id }),
+    ]);
+
+    if (invoiceCount > 0 || proposalCount > 0) {
+      return res.status(400).json({
+        message: `Cannot delete: this client has ${invoiceCount} invoice${invoiceCount !== 1 ? 's' : ''}${proposalCount > 0 ? ` and ${proposalCount} proposal${proposalCount !== 1 ? 's' : ''}` : ''}. Archive or reassign them first.`,
+      });
     }
+
+    await client.deleteOne();
+    emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'deleted' });
+    res.json({ message: 'Client removed' });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: (error as Error).message });
     console.error('Error deleting client:', error);
+  }
+};
+
+// POST /api/clients/:id/portal — generate (or return) portal token
+export const generatePortalLink = async (req: Request, res: Response) => {
+  try {
+    const client = await Client.findOne({
+      _id: req.params.id,
+      businessId: (req.user as any).businessId,
+    });
+    if (!client) return res.status(404).json({ message: 'Client not found' });
+
+    if (!client.portalToken) {
+      client.portalToken = crypto.randomBytes(24).toString('hex');
+      await client.save();
+    }
+
+    res.json({ token: client.portalToken });
+  } catch {
+    res.status(500).json({ message: 'Failed to generate portal link' });
+  }
+};
+
+// GET /api/clients/portal/:token — public, no auth
+export const getClientPortal = async (req: Request, res: Response) => {
+  try {
+    const client = await Client.findOne({ portalToken: req.params.token })
+      .populate('businessId', 'name currency profile');
+    if (!client) return res.status(404).json({ message: 'Portal not found' });
+
+    const [invoices, proposals] = await Promise.all([
+      Invoice.find({ clientId: client._id }).sort({ createdAt: -1 }),
+      Proposal.find({ clientId: client._id, status: { $in: ['sent', 'accepted', 'declined'] } }).sort({ createdAt: -1 }),
+    ]);
+
+    const biz = client.businessId as any;
+    res.json({
+      client: { name: client.name, email: client.email },
+      business: {
+        name: biz?.name,
+        currency: biz?.currency || 'NGN',
+        logoImage: biz?.profile?.logoImage,
+        accentColor: biz?.profile?.accentColor,
+      },
+      invoices,
+      proposals,
+    });
+  } catch {
+    res.status(500).json({ message: 'Failed to load portal' });
   }
 };

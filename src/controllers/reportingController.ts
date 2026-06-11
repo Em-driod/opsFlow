@@ -167,3 +167,53 @@ export const getDetailedTransactions = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
   }
 };
+
+/**
+ * @desc    Monthly income/expense trend for the last N months
+ * @route   GET /api/reporting/monthly-trend?months=12
+ * @access  Private
+ */
+export const getMonthlyTrend = async (req: Request, res: Response) => {
+  try {
+    const businessId = (req.user as any).businessId;
+    const months = Math.min(Math.max(parseInt(req.query.months as string) || 12, 1), 24);
+
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date();
+    start.setMonth(start.getMonth() - months + 1);
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+
+    const rows = await Transaction.aggregate([
+      {
+        $match: {
+          businessId: new mongoose.Types.ObjectId(businessId),
+          date: { $gte: start, $lte: end },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$date' },
+            month: { $month: '$date' },
+          },
+          income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+          expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        },
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]);
+
+    const result = rows.map((r) => ({
+      month: `${r._id.year}-${String(r._id.month).padStart(2, '0')}`,
+      income: r.income,
+      expenses: r.expenses,
+      net: r.income - r.expenses,
+    }));
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: (error as Error).message });
+  }
+};

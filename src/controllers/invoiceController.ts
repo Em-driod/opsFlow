@@ -9,7 +9,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
 import { emitToBusiness } from '../services/socketService.js';
-import { sendInvoiceEmail } from '../services/emailService.js';
+import { sendInvoiceEmail, sendReceiptEmail } from '../services/emailService.js';
 import axios from 'axios';
 import crypto from 'crypto';
 
@@ -207,15 +207,20 @@ export const scanInvoice = async (req: Request, res: Response) => {
 export const getInvoices = async (req: Request, res: Response) => {
   try {
     const user = req.user as any;
-    const invoices = await Invoice.find({ 
-      businessId: user.businessId,
-      // Add a field to track which user created the invoice
-      // For now, we'll assume all invoices are visible to all business users
-      // In a real system, you might want to add a 'createdBy' field to invoices
-    })
-      .populate('clientId', 'name email phone')
-      .sort({ createdAt: -1 });
-    res.status(200).json(invoices);
+    const { page, limit: limitQ, status, search } = req.query;
+    const filter: any = { businessId: user.businessId };
+    if (status) filter.status = status;
+    if (search) filter.invoiceNumber = { $regex: String(search), $options: 'i' };
+
+    const pageNum = Math.max(1, parseInt(String(page || '1')));
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(limitQ || '50'))));
+    const skip = (pageNum - 1) * pageSize;
+
+    const [invoices, total] = await Promise.all([
+      Invoice.find(filter).populate('clientId', 'name email phone').sort({ createdAt: -1 }).skip(skip).limit(pageSize),
+      Invoice.countDocuments(filter),
+    ]);
+    res.status(200).json({ data: invoices, total, page: pageNum, pages: Math.ceil(total / pageSize) });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });
   }
@@ -530,6 +535,27 @@ export const paystackWebhook = async (req: Request, res: Response) => {
 
       await invoice.save();
       emitToBusiness(String(invoice.businessId), 'data_updated', { type: 'invoice', action: 'paid' });
+
+      // Send payment receipt email
+      const populated = await Invoice.findById(invoiceId)
+        .populate('businessId', 'name currency')
+        .populate('clientId', 'name email');
+      const biz = (populated?.businessId as any);
+      const client = (populated?.clientId as any);
+      const recipientEmail = client?.email || invoice.recipientEmail;
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      if (recipientEmail && biz) {
+        sendReceiptEmail({
+          recipientEmail,
+          clientName: client?.name || 'Valued Client',
+          businessName: biz.name,
+          invoiceNumber: invoice.invoiceNumber,
+          total: invoice.total,
+          currency: biz.currency || 'NGN',
+          paidAt: new Date().toISOString(),
+          publicLink: `${frontendUrl}/#/invoice/${invoice._id}`,
+        }).catch(() => {});
+      }
     }
   }
 

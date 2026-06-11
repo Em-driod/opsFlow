@@ -24,6 +24,7 @@ export interface ITransaction extends Document {
   bankAccountId?: string;
   isReconciled?: boolean;
   source?: 'manual' | 'bank_sync' | 'ocr_scan' | 'csv_import';
+  receiptImage?: string;
 }
 
 const TransactionSchema: Schema = new Schema(
@@ -51,6 +52,7 @@ const TransactionSchema: Schema = new Schema(
       enum: ['manual', 'bank_sync', 'ocr_scan', 'csv_import'],
       default: 'manual',
     },
+    receiptImage: { type: String },
   },
   { timestamps: true },
 );

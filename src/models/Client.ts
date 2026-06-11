@@ -9,6 +9,7 @@ export interface IClient extends Document {
   balance?: number;
   businessValue?: number;
   status?: 'active' | 'inactive';
+  portalToken?: string;
 }
 
 const ClientSchema: Schema = new Schema(
@@ -21,6 +22,7 @@ const ClientSchema: Schema = new Schema(
     balance: { type: Number, default: 0 },
     businessValue: { type: Number, default: 50 },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    portalToken: { type: String, unique: true, sparse: true },
   },
   { timestamps: true },
 );

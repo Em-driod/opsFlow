@@ -3,6 +3,7 @@ import Transaction from '../models/Transaction.js';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import ScannedTransaction from '../models/ScannedTransaction.js';
+import Proposal from '../models/Proposal.js';
 import mongoose from 'mongoose';
 
 /**
@@ -67,6 +68,11 @@ export const getKpis = async (req: Request, res: Response) => {
 
     const totalClients = await Client.countDocuments({ businessId, status: 'active' });
 
+    const [pendingProposals, overdueInvoices] = await Promise.all([
+      Proposal.countDocuments({ businessId, status: 'sent' }),
+      Invoice.countDocuments({ businessId, status: 'overdue' }),
+    ]);
+
     // Build daily new-client trend for the current month
     const newClientsPerDay = await Client.aggregate([
       {
@@ -96,6 +102,8 @@ export const getKpis = async (req: Request, res: Response) => {
       totalExpenses: { value: totalExpenses, trend: expenseTrend },
       netProfit: { value: netProfit, trend: netProfitTrend },
       totalClients: { value: totalClients, trend: clientTrend },
+      pendingProposals,
+      overdueInvoices,
     });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: (error as Error).message });

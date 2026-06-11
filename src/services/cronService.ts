@@ -5,6 +5,7 @@ import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import { writeSummaryRow } from './googleSheetsService.js';
 import { generateDueRecurringInvoices } from '../controllers/recurringInvoiceController.js';
+import { sendReminderEmail } from './emailService.js';
 
 /**
  * Scheduled jobs for OpsFlow Automation.
@@ -16,6 +17,7 @@ import { generateDueRecurringInvoices } from '../controllers/recurringInvoiceCon
 const NIGHTLY_SUMMARY_CRON = process.env.NIGHTLY_SUMMARY_CRON || '59 23 * * *';
 const OVERDUE_SWEEP_CRON = process.env.OVERDUE_SWEEP_CRON || '*/30 * * * *';
 const RECURRING_INVOICE_CRON = process.env.RECURRING_INVOICE_CRON || '0 7 * * *';
+const REMINDER_CRON = '0 9 * * *'; // 9am daily
 
 export const initCronJobs = () => {
   if (!cron.validate(NIGHTLY_SUMMARY_CRON)) {
@@ -38,6 +40,9 @@ export const initCronJobs = () => {
     cron.schedule(RECURRING_INVOICE_CRON, generateDueRecurringInvoices);
     console.log(`[Cron] Recurring invoices scheduled: "${RECURRING_INVOICE_CRON}"`);
   }
+
+  cron.schedule(REMINDER_CRON, () => sendInvoiceReminders());
+  console.log(`[Cron] Invoice reminders scheduled: "${REMINDER_CRON}"`);
 };
 
 async function runNightlyJob() {
@@ -55,12 +60,66 @@ async function runNightlyJob() {
   }
 }
 
+async function sendInvoiceReminders() {
+  console.log('[Cron] Running invoice reminders...');
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+  const now = new Date();
+
+  const in3Days = new Date(now); in3Days.setDate(now.getDate() + 3);
+  const in3DaysEnd = new Date(in3Days); in3DaysEnd.setHours(23, 59, 59, 999);
+  in3Days.setHours(0, 0, 0, 0);
+
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+
+  const over3Days = new Date(now); over3Days.setDate(now.getDate() - 3);
+  const over3DaysEnd = new Date(over3Days); over3DaysEnd.setHours(23, 59, 59, 999);
+  over3Days.setHours(0, 0, 0, 0);
+
+  try {
+    const [upcoming, dueToday, overdue3] = await Promise.all([
+      Invoice.find({ status: 'sent', dueDate: { $gte: in3Days, $lte: in3DaysEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
+      Invoice.find({ status: 'sent', dueDate: { $gte: todayStart, $lte: todayEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
+      Invoice.find({ status: 'overdue', dueDate: { $gte: over3Days, $lte: over3DaysEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
+    ]);
+
+    const sendAll = [...upcoming.map(i => ({ invoice: i, type: 'upcoming' as const })),
+                     ...dueToday.map(i => ({ invoice: i, type: 'due_today' as const })),
+                     ...overdue3.map(i => ({ invoice: i, type: 'overdue' as const }))];
+
+    let sent = 0;
+    for (const { invoice, type } of sendAll) {
+      const biz = invoice.businessId as any;
+      const client = invoice.clientId as any;
+      const email = client?.email || (invoice as any).recipientEmail;
+      if (!email) continue;
+
+      await sendReminderEmail({
+        recipientEmail: email,
+        clientName: client?.name || 'Valued Client',
+        businessName: biz?.name || 'OpsFlow Business',
+        invoiceNumber: invoice.invoiceNumber,
+        total: invoice.total,
+        currency: biz?.currency || 'NGN',
+        dueDate: invoice.dueDate.toISOString(),
+        publicLink: `${frontendUrl}/#/invoice/${invoice._id}`,
+        type,
+      });
+      sent++;
+    }
+    console.log(`[Cron] Sent ${sent} invoice reminders.`);
+  } catch (err) {
+    console.error('[Cron] Reminder job failed:', err);
+  }
+}
+
+
 async function markOverdueInvoices() {
   try {
     const result = await Invoice.updateMany(
       {
         dueDate: { $lt: new Date() },
-        status: { $in: ['draft', 'sent'] },
+        status: 'sent',
       },
       { $set: { status: 'overdue' } },
     );

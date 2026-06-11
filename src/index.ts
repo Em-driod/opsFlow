@@ -27,8 +27,14 @@ import automationRoutes from './routes/automationRoutes.js';
 import capitalAssetRoutes from './routes/capitalAssetRoutes.js';
 import taxRoutes from './routes/taxRoutes.js';
 import recurringInvoiceRoutes from './routes/recurringInvoiceRoutes.js';
+import proposalRoutes from './routes/proposalRoutes.js';
+import productRoutes from './routes/productRoutes.js';
+import budgetRoutes from './routes/budgetRoutes.js';
+import searchRoutes from './routes/searchRoutes.js';
 import { initCronJobs } from './services/cronService.js';
 import { initSocketServer } from './services/socketService.js';
+import rateLimit from 'express-rate-limit';
+import { sanitizeBody } from './middleware/sanitize.js';
 
 const startServer = async () => {
   try {
@@ -48,6 +54,30 @@ const startServer = async () => {
     app.use(cors());
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ limit: '10mb', extended: true }));
+    app.use(sanitizeBody);
+
+    // Rate limiters
+    const publicLimiter = rateLimit({
+      windowMs: 60 * 1000, // 1 minute
+      max: 30,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Too many requests, please try again later.' },
+    });
+    const authLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 20,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { message: 'Too many login attempts, please try again later.' },
+    });
+    app.use('/api/invoices/public', publicLimiter);
+    app.use('/api/proposals/public', publicLimiter);
+    app.use('/api/payrolls/payslip', publicLimiter);
+    app.use('/api/clients/portal', publicLimiter);
+    app.use('/api/businesses/public', publicLimiter);
+    app.use('/api/users/login', authLimiter);
+    app.use('/api/users/register', authLimiter);
 
     // Routes
     app.use('/api/users', userRoutes);
@@ -69,6 +99,10 @@ const startServer = async () => {
     app.use('/api/capital-assets', capitalAssetRoutes);
     app.use('/api/tax', taxRoutes);
     app.use('/api/recurring-invoices', recurringInvoiceRoutes);
+    app.use('/api/proposals', proposalRoutes);
+    app.use('/api/products', productRoutes);
+    app.use('/api/budgets', budgetRoutes);
+    app.use('/api/search', searchRoutes);
 
     // Root route
     app.get('/', (_req: Request, res: Response) => {
