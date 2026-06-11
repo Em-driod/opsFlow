@@ -9,7 +9,9 @@ const currentPeriod = () => {
 };
 
 const periodRange = (period: string) => {
-  const [year, month] = period.split('-').map(Number);
+  const parts = period.split('-');
+  const year = parseInt(parts[0]!, 10);
+  const month = parseInt(parts[1]!, 10);
   const start = new Date(Date.UTC(year, month - 1, 1));
   const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
   return { start, end };

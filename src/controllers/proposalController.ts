@@ -14,7 +14,7 @@ const getNextProposalNumber = async (businessId: string): Promise<string> => {
     { $inc: { value: 1 } },
     { new: true, upsert: true },
   );
-  return `PROP-${String(counter.value).padStart(4, '0')}`;
+  return `PROP-${String((counter as any).value ?? 1).padStart(4, '0')}`;
 };
 
 // GET /api/proposals
@@ -114,7 +114,7 @@ export const sendProposal = async (req: Request, res: Response) => {
         lineItems: proposal.lineItems as any,
         subtotal: proposal.subtotal,
         tax: proposal.tax,
-        notes: proposal.notes,
+        ...(proposal.notes ? { notes: proposal.notes } : {}),
         publicLink: `${frontendUrl}/#/proposal/${proposal._id}`,
       }).catch(() => false);
     }
