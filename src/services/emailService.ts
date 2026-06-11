@@ -208,8 +208,6 @@ export const sendProposalEmail = async (data: {
     </tr>
   `).join('');
 
-  const lineItemRows = data.lineItems.map(item => `
-    <tr>
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;"><tr><td align="center">
