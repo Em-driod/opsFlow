@@ -9,12 +9,18 @@ import { createNotification } from './notificationController.js';
 import { sendProposalEmail } from '../services/emailService.js';
 
 const getNextProposalNumber = async (businessId: string): Promise<string> => {
+  const COUNTER_ID = `proposals_${businessId}`;
+  const exists = await Counter.exists({ _id: COUNTER_ID });
+  if (!exists) {
+    const existingCount = await Proposal.countDocuments({ businessId });
+    try { await Counter.create({ _id: COUNTER_ID, seq: existingCount }); } catch (e: any) { if (e.code !== 11000) throw e; }
+  }
   const counter = await Counter.findOneAndUpdate(
-    { name: `proposal_${businessId}` },
-    { $inc: { value: 1 } },
-    { new: true, upsert: true },
+    { _id: COUNTER_ID },
+    { $inc: { seq: 1 } },
+    { new: true },
   );
-  return `PROP-${String((counter as any).value ?? 1).padStart(4, '0')}`;
+  return `PROP-${counter!.seq.toString().padStart(4, '0')}`;
 };
 
 // GET /api/proposals
@@ -143,13 +149,19 @@ export const convertToInvoice = async (req: Request, res: Response) => {
       });
     }
 
-    // Build invoice number
-    const counter = await Counter.findOneAndUpdate(
-      { name: `invoice_${businessId}` },
-      { $inc: { value: 1 } },
-      { new: true, upsert: true },
+    // Build invoice number using the same counter as invoiceController
+    const INV_COUNTER_ID = 'invoices';
+    const invExists = await Counter.exists({ _id: INV_COUNTER_ID });
+    if (!invExists) {
+      const existingCount = await Invoice.countDocuments();
+      try { await Counter.create({ _id: INV_COUNTER_ID, seq: existingCount }); } catch (e: any) { if (e.code !== 11000) throw e; }
+    }
+    const invCounter = await Counter.findOneAndUpdate(
+      { _id: INV_COUNTER_ID },
+      { $inc: { seq: 1 } },
+      { new: true },
     );
-    const invoiceNumber = `INV-${String((counter as any).value ?? 1).padStart(4, '0')}`;
+    const invoiceNumber = `INV-${invCounter!.seq.toString().padStart(4, '0')}`;
 
     const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : (() => {
       const d = new Date(); d.setDate(d.getDate() + 14); return d;
