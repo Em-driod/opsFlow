@@ -1,5 +1,4 @@
-import { Resend } from 'resend';
-
+﻿
 const esc = (str: string | undefined | null): string =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -7,6 +6,49 @@ const esc = (str: string | undefined | null): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;');
+
+interface BrevoPayload {
+  sender: { name: string; email: string };
+  to: { email: string; name?: string }[];
+  subject: string;
+  htmlContent: string;
+}
+
+async function sendBrevoEmail(payload: BrevoPayload): Promise<boolean> {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    console.warn('[Email] BREVO_API_KEY not set — skipping email send.');
+    return false;
+  }
+
+  const senderEmail = process.env.BREVO_SENDER_EMAIL || 'noreply@morniy.com';
+  const body = { ...payload, sender: { ...payload.sender, email: senderEmail } };
+
+  try {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('[Email] Brevo error:', err);
+      return false;
+    }
+
+    const result = await res.json() as { messageId?: string };
+    console.log('[Email] Sent via Brevo — messageId:', result.messageId);
+    return true;
+  } catch (err: any) {
+    console.error('[Email] Brevo request failed:', err?.message);
+    return false;
+  }
+}
 
 interface InvoiceEmailData {
   invoiceNumber: string;
@@ -34,10 +76,6 @@ export const sendReminderEmail = async (data: {
   publicLink: string;
   type: 'upcoming' | 'due_today' | 'overdue';
 }): Promise<boolean> => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return false;
-  const resend = new Resend(apiKey);
-
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.total);
@@ -85,23 +123,17 @@ export const sendReminderEmail = async (data: {
       </a>
     </td></tr>
     <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
-      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">OpsFlow</strong></p>
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">Morniy</strong></p>
     </td></tr>
   </table></td></tr></table>
   </body></html>`;
 
-  try {
-    const { error } = await resend.emails.send({
-      from: `${data.businessName} <onboarding@resend.dev>`,
-      to: data.recipientEmail,
-      subject: subjects[data.type],
-      html,
-    });
-    if (error) { console.error('[Email] Reminder error:', error); return false; }
-    return true;
-  } catch (err: any) {
-    console.error('[Email] Reminder failed:', err?.message); return false;
-  }
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.clientName }],
+    subject: subjects[data.type],
+    htmlContent: html,
+  });
 };
 
 export const sendReceiptEmail = async (data: {
@@ -114,10 +146,6 @@ export const sendReceiptEmail = async (data: {
   paidAt: string;
   publicLink: string;
 }): Promise<boolean> => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return false;
-  const resend = new Resend(apiKey);
-
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.total);
@@ -130,9 +158,6 @@ export const sendReceiptEmail = async (data: {
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 16px;"><tr><td align="center">
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
     <tr><td style="background:#10b981;padding:32px 40px;">
-      <div style="width:48px;height:48px;background:rgba(255,255,255,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
-        <span style="font-size:24px;">✓</span>
-      </div>
       <h1 style="margin:0;font-size:22px;font-weight:900;color:#fff;">Payment Received</h1>
       <p style="margin:6px 0 0;font-size:14px;color:rgba(255,255,255,0.8);">From ${sBusinessName}</p>
     </td></tr>
@@ -152,23 +177,17 @@ export const sendReceiptEmail = async (data: {
       </a>
     </td></tr>
     <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
-      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">OpsFlow</strong></p>
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">Morniy</strong></p>
     </td></tr>
   </table></td></tr></table>
   </body></html>`;
 
-  try {
-    const { error } = await resend.emails.send({
-      from: `${data.businessName} <onboarding@resend.dev>`,
-      to: data.recipientEmail,
-      subject: `Payment confirmed — Invoice ${data.invoiceNumber} | ${data.businessName}`,
-      html,
-    });
-    if (error) { console.error('[Email] Receipt error:', error); return false; }
-    return true;
-  } catch (err: any) {
-    console.error('[Email] Receipt failed:', err?.message); return false;
-  }
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.clientName }],
+    subject: `Payment confirmed — Invoice ${data.invoiceNumber} | ${data.businessName}`,
+    htmlContent: html,
+  });
 };
 
 export const sendProposalEmail = async (data: {
@@ -186,10 +205,6 @@ export const sendProposalEmail = async (data: {
   notes?: string;
   publicLink: string;
 }): Promise<boolean> => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return false;
-  const resend = new Resend(apiKey);
-
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.total);
@@ -199,6 +214,7 @@ export const sendProposalEmail = async (data: {
   const sProposalNumber = esc(data.proposalNumber);
   const sTitle = esc(data.title);
   const sNotes = esc(data.notes);
+
   const lineItemRows = data.lineItems.map(item => `
     <tr>
       <td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#334155;">${esc(item.description)}</td>
@@ -262,34 +278,20 @@ export const sendProposalEmail = async (data: {
       <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;">Or copy: <a href="${data.publicLink}" style="color:#4f46e5;word-break:break-all;">${data.publicLink}</a></p>
     </td></tr>
     <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
-      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">OpsFlow</strong></p>
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">Morniy</strong></p>
     </td></tr>
   </table></td></tr></table>
 </body></html>`;
 
-  try {
-    const { error } = await resend.emails.send({
-      from: `${data.businessName} <onboarding@resend.dev>`,
-      to: data.recipientEmail,
-      subject: `Proposal ${data.proposalNumber}: ${data.title} — ${formattedTotal} | ${data.businessName}`,
-      html,
-    });
-    if (error) { console.error('[Email] Proposal error:', error); return false; }
-    return true;
-  } catch (err: any) {
-    console.error('[Email] Proposal send failed:', err?.message); return false;
-  }
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.clientName }],
+    subject: `Proposal ${data.proposalNumber}: ${sTitle} — ${formattedTotal} | ${data.businessName}`,
+    htmlContent: html,
+  });
 };
 
 export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean> => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn('[Email] RESEND_API_KEY not set — skipping email send.');
-    return false;
-  }
-
-  const resend = new Resend(apiKey);
-
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency: data.currency === 'NGN' ? 'NGN' : (data.currency || 'NGN'),
@@ -322,8 +324,6 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-
-        <!-- Header -->
         <tr>
           <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:40px 40px 32px;">
             <table width="100%">
@@ -342,8 +342,6 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             </table>
           </td>
         </tr>
-
-        <!-- Billed To -->
         <tr>
           <td style="padding:32px 40px 0;">
             <table width="100%">
@@ -360,8 +358,6 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             </table>
           </td>
         </tr>
-
-        <!-- Line Items -->
         <tr>
           <td style="padding:24px 40px 0;">
             <table width="100%" cellpadding="0" cellspacing="0" style="border-radius:12px;overflow:hidden;border:1px solid #f1f5f9;">
@@ -377,8 +373,6 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             </table>
           </td>
         </tr>
-
-        <!-- Totals -->
         <tr>
           <td style="padding:16px 40px 0;">
             <table width="100%" cellpadding="0" cellspacing="0">
@@ -404,10 +398,7 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             </table>
           </td>
         </tr>
-
         ${data.notes ? `<tr><td style="padding:16px 40px 0;"><div style="background:#f8fafc;border-radius:10px;padding:16px;"><p style="margin:0 0 4px;font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Notes</p><p style="margin:0;font-size:13px;color:#64748b;line-height:1.6;">${sNotes}</p></div></td></tr>` : ''}
-
-        <!-- CTA -->
         <tr>
           <td style="padding:32px 40px 40px;" align="center">
             <a href="${data.publicLink}" style="display:inline-block;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;text-transform:uppercase;">
@@ -416,39 +407,23 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;">Or copy this link: <a href="${data.publicLink}" style="color:#4f46e5;word-break:break-all;">${data.publicLink}</a></p>
           </td>
         </tr>
-
-        <!-- Footer -->
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
-            <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">OpsFlow</strong></p>
+            <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">Morniy</strong></p>
           </td>
         </tr>
-
       </table>
     </td></tr>
   </table>
 </body>
 </html>`;
 
-  try {
-    const { data: result, error } = await resend.emails.send({
-      from: `${data.businessName} <onboarding@resend.dev>`,
-      to: data.recipientEmail,
-      subject: `Invoice ${data.invoiceNumber} — ${formattedTotal} due ${formattedDue} | ${data.businessName}`,
-      html,
-    });
-
-    if (error) {
-      console.error('[Email] Resend error:', error);
-      return false;
-    }
-
-    console.log(`[Email] Sent invoice ${data.invoiceNumber} to ${data.recipientEmail} — id: ${result?.id}`);
-    return true;
-  } catch (err: any) {
-    console.error('[Email] Failed to send via Resend:', err?.message || err);
-    return false;
-  }
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.clientName }],
+    subject: `Invoice ${data.invoiceNumber} — ${formattedTotal} due ${formattedDue} | ${data.businessName}`,
+    htmlContent: html,
+  });
 };
 
 export const sendIssuedReceiptEmail = async (data: {
@@ -462,10 +437,6 @@ export const sendIssuedReceiptEmail = async (data: {
   date: string;
   publicLink: string;
 }): Promise<boolean> => {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) { console.warn('[Email] RESEND_API_KEY not set'); return false; }
-  const resend = new Resend(apiKey);
-
   const formattedAmount = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.amount);
@@ -516,21 +487,15 @@ export const sendIssuedReceiptEmail = async (data: {
       <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;">Or copy: <a href="${data.publicLink}" style="color:#059669;word-break:break-all;">${data.publicLink}</a></p>
     </td></tr>
     <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
-      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#059669;">OpsFlow</strong></p>
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#059669;">Morniy</strong></p>
     </td></tr>
   </table></td></tr></table>
 </body></html>`;
 
-  try {
-    const { error } = await resend.emails.send({
-      from: `${data.businessName} <onboarding@resend.dev>`,
-      to: data.recipientEmail,
-      subject: `Payment Receipt ${data.receiptNumber} — ${formattedAmount} | ${data.businessName}`,
-      html,
-    });
-    if (error) { console.error('[Email] Receipt issue error:', error); return false; }
-    return true;
-  } catch (err: any) {
-    console.error('[Email] Receipt email failed:', err?.message); return false;
-  }
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.payerName }],
+    subject: `Payment Receipt ${data.receiptNumber} — ${formattedAmount} | ${data.businessName}`,
+    htmlContent: html,
+  });
 };
