@@ -1,4 +1,3 @@
-﻿
 const esc = (str: string | undefined | null): string =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
