@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec tsx src/index.ts",
-    "build": "tsc",
+    "build": "npm install --include=dev && tsc",
     "start": "node dist/index.js",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "lint": "eslint src/**/*.ts",
@@ -35,11 +35,11 @@
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.1",
-    "@types/bcryptjs": "^2.4.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jest": "^30.0.0",
-    "@types/jsonwebtoken": "^9.0.2",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.7.1",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
