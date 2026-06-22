@@ -504,7 +504,8 @@ export const sendPasswordResetEmail = async (data: {
   name: string;
   resetUrl: string;
 }): Promise<boolean> => {
-  const { name: sName, resetUrl: sUrl } = { name: esc(data.name), resetUrl: esc(data.resetUrl) };
+  const sName = esc(data.name);
+  const resetUrl = data.resetUrl; // keep raw — must not be HTML-escaped in href
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:48px 24px;">
@@ -520,13 +521,16 @@ export const sendPasswordResetEmail = async (data: {
         Click the button below to choose a new password.
       </p>
       <div style="text-align:center;margin:32px 0;">
-        <a href="${sUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;">
+        <a href="${resetUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;">
           Reset My Password
         </a>
       </div>
       <p style="margin:24px 0 0;font-size:12px;color:#94a3b8;line-height:1.7;">
         This link expires in <strong>1 hour</strong>. If you did not request a password reset,
         you can safely ignore this email — your password will not change.
+      </p>
+      <p style="margin:12px 0 0;font-size:11px;color:#94a3b8;word-break:break-all;">
+        Or copy this link: ${resetUrl}
       </p>
     </td></tr>
     <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
