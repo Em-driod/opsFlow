@@ -40,11 +40,28 @@ export const createClient = async (req: Request, res: Response) => {
 // @access  Private
 export const getClients = async (req: Request, res: Response) => {
   try {
-    const clients = await Client.find({ businessId: (req.user as any).businessId }); // Filter by businessId
-    res.json(clients);
+    const businessId = (req.user as any).businessId;
+    const { page, limit: limitQ, search } = req.query;
+
+    const pageNum = Math.max(1, parseInt(String(page || '1')));
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(limitQ || '50'))));
+    const skip = (pageNum - 1) * pageSize;
+
+    const filter: Record<string, unknown> = { businessId };
+    if (search) {
+      const re = new RegExp(String(search), 'i');
+      filter.$or = [{ name: re }, { email: re }, { phone: re }];
+    }
+
+    const [clients, total] = await Promise.all([
+      Client.find(filter).sort({ createdAt: -1 }).skip(skip).limit(pageSize),
+      Client.countDocuments(filter),
+    ]);
+
+    res.json({ data: clients, total, page: pageNum, pages: Math.ceil(total / pageSize) });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
     console.error('Error fetching clients:', error);
+    res.status(500).json({ message: 'Server error', error: (error as Error).message });
   }
 };
 

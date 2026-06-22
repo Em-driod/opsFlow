@@ -33,4 +33,6 @@ const PayrollSchema: Schema = new Schema(
   { timestamps: true },
 );
 
+PayrollSchema.index({ businessId: 1, createdAt: -1 });
+
 export default mongoose.model<IPayroll>('Payroll', PayrollSchema);

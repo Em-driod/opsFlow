@@ -27,4 +27,7 @@ const ClientSchema: Schema = new Schema(
   { timestamps: true },
 );
 
+ClientSchema.index({ businessId: 1, createdAt: -1 });
+ClientSchema.index({ businessId: 1, name: 'text', email: 'text' });
+
 export default mongoose.model<IClient>('Client', ClientSchema);

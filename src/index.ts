@@ -2,8 +2,10 @@
 import dotenv from 'dotenv';
 dotenv.config(); // MUST be first — before anything else
 
-import express, { type Application, type Request, type Response } from 'express';
+import express, { type Application, type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
 import http from 'http';
 
 import connectDB from './config/db.js';
@@ -37,41 +39,80 @@ import { initSocketServer } from './services/socketService.js';
 import rateLimit from 'express-rate-limit';
 import { sanitizeBody } from './middleware/sanitize.js';
 
+/* ─────────────────────────────────────────────
+   CORS — only allow known origins
+   Add your production domain to ALLOWED_ORIGINS
+   or set ALLOWED_ORIGINS=https://app.morniy.com in .env
+───────────────────────────────────────────── */
+const ALLOWED_ORIGINS: string[] = [
+  'http://localhost:5173',   // Vite dev
+  'http://localhost:4173',   // Vite preview
+  'http://localhost:3000',
+  'capacitor://localhost',   // Capacitor Android/iOS
+  'https://localhost',
+  ...(process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+    : []),
+];
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman in dev)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
 const startServer = async () => {
   try {
-    // ✅ Connect to MongoDB FIRST
     await connectDB();
 
     const app: Application = express();
     const server = http.createServer(app);
 
-    // ✅ Initialize Socket.io
     initSocketServer(server);
-
-    // ✅ Initialize Automation Scheduler
     initCronJobs();
 
-    // Middleware
-    app.use(cors());
+    /* ── Security headers ── */
+    app.use(helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow images/assets from CDN
+      contentSecurityPolicy: false, // front-end handles its own CSP via Vite
+    }));
+
+    /* ── CORS ── */
+    app.use(cors(corsOptions));
+    app.options('*', cors(corsOptions)); // pre-flight for all routes
+
+    /* ── Request logging ── */
+    app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+    /* ── Body parsing ── */
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+    /* ── Input sanitisation ── */
     app.use(sanitizeBody);
 
-    // Rate limiters
+    /* ── Rate limiters ── */
     const publicLimiter = rateLimit({
-      windowMs: 60 * 1000, // 1 minute
+      windowMs: 60 * 1000,
       max: 30,
       standardHeaders: true,
       legacyHeaders: false,
       message: { message: 'Too many requests, please try again later.' },
     });
     const authLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
+      windowMs: 15 * 60 * 1000,
       max: 20,
       standardHeaders: true,
       legacyHeaders: false,
       message: { message: 'Too many login attempts, please try again later.' },
     });
+
     app.use('/api/invoices/public', publicLimiter);
     app.use('/api/proposals/public', publicLimiter);
     app.use('/api/payrolls/payslip', publicLimiter);
@@ -80,7 +121,7 @@ const startServer = async () => {
     app.use('/api/users/login', authLimiter);
     app.use('/api/users/register', authLimiter);
 
-    // Routes
+    /* ── Routes ── */
     app.use('/api/users', userRoutes);
     app.use('/api/businesses', businessRoutes);
     app.use('/api/clients', clientRoutes);
@@ -106,22 +147,38 @@ const startServer = async () => {
     app.use('/api/search', searchRoutes);
     app.use('/api/receipts', receiptRoutes);
 
-    // Root route
+    /* ── Utility endpoints ── */
     app.get('/', (_req: Request, res: Response) => {
-      res.status(200).send('OpsFlow API is running. Direct access is via /api endpoints.');
+      res.status(200).json({ name: 'Morniy API', status: 'running' });
+    });
+    app.get('/api/health', (_req: Request, res: Response) => {
+      res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
     });
 
-    // Health check
-    app.get('/api/health', (_req: Request, res: Response) => {
-      res.status(200).json({
-        status: 'OK',
-        message: 'Server is running',
-      });
+    /* ── 404 handler ── */
+    app.use((_req: Request, res: Response) => {
+      res.status(404).json({ message: 'Route not found.' });
+    });
+
+    /* ── Global error handler ── */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    app.use((err: Error & { status?: number; statusCode?: number }, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status ?? err.statusCode ?? 500;
+      const message = err.message || 'Internal server error.';
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.error(`[ERROR] ${status} — ${message}`, err.stack);
+      } else {
+        // In production, only log 5xx to avoid leaking stack traces
+        if (status >= 500) console.error(`[ERROR] ${status} — ${message}`);
+      }
+
+      res.status(status).json({ message });
     });
 
     const PORT = Number(process.env.PORT) || 5000;
     server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🚀 Morniy API running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

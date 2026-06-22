@@ -498,3 +498,48 @@ export const sendIssuedReceiptEmail = async (data: {
     htmlContent: html,
   });
 };
+
+export const sendPasswordResetEmail = async (data: {
+  email: string;
+  name: string;
+  resetUrl: string;
+}): Promise<boolean> => {
+  const { name: sName, resetUrl: sUrl } = { name: esc(data.name), resetUrl: esc(data.resetUrl) };
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:48px 24px;">
+  <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+    <tr><td style="background:linear-gradient(135deg,#4f46e5,#6366f1);padding:40px;text-align:center;">
+      <p style="margin:0;font-size:28px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">Morniy</p>
+      <p style="margin:8px 0 0;font-size:13px;color:rgba(255,255,255,0.75);">Password Reset Request</p>
+    </td></tr>
+    <tr><td style="padding:40px;">
+      <p style="margin:0 0 16px;font-size:16px;color:#0f172a;font-weight:700;">Hi ${sName},</p>
+      <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+        We received a request to reset the password for your Morniy account.
+        Click the button below to choose a new password.
+      </p>
+      <div style="text-align:center;margin:32px 0;">
+        <a href="${sUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;">
+          Reset My Password
+        </a>
+      </div>
+      <p style="margin:24px 0 0;font-size:12px;color:#94a3b8;line-height:1.7;">
+        This link expires in <strong>1 hour</strong>. If you did not request a password reset,
+        you can safely ignore this email — your password will not change.
+      </p>
+    </td></tr>
+    <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong style="color:#4f46e5;">Morniy</strong></p>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>`;
+
+  return sendBrevoEmail({
+    sender: { name: 'Morniy', email: '' },
+    to: [{ email: data.email, name: data.name }],
+    subject: 'Reset your Morniy password',
+    htmlContent: html,
+  });
+};

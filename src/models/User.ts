@@ -6,6 +6,8 @@ export interface IUser extends Document {
   email: string;
   password: string;
   businessId: mongoose.Types.ObjectId;
+  passwordResetToken?: string;
+  passwordResetExpires?: Date;
 }
 
 const UserSchema: Schema = new Schema(
@@ -15,6 +17,8 @@ const UserSchema: Schema = new Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
+    passwordResetToken: { type: String, select: false },
+    passwordResetExpires: { type: Date, select: false },
   },
   { timestamps: true },
 );

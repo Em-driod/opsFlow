@@ -47,6 +47,7 @@ const InvoiceSchema: Schema = new Schema(
   { timestamps: true },
 );
 
-// Auto-increment invoice number pre-save hook can be added here in a real app
+InvoiceSchema.index({ businessId: 1, createdAt: -1 });
+InvoiceSchema.index({ businessId: 1, status: 1 });
 
 export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);

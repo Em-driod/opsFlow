@@ -267,3 +267,56 @@ const generateToken = (id: mongoose.Types.ObjectId) => {
     expiresIn: '30d',
   });
 };
+
+import crypto from 'crypto';
+import { sendPasswordResetEmail } from '../services/emailService.js';
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body as { email: string };
+    const user = await User.findOne({ email: email?.toLowerCase().trim() }).select('+passwordResetToken +passwordResetExpires');
+    // Always return 200 — don't reveal whether the email exists
+    if (!user) return res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = crypto.createHash('sha256').update(token).digest('hex');
+    user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save();
+
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+    await sendPasswordResetEmail({ email: user.email, name: user.name, resetUrl });
+
+    res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token } = req.params as { token: string };
+    const { password } = req.body as { password: string };
+
+    if (!password || password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+    }
+
+    const hashed = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      passwordResetToken: hashed,
+      passwordResetExpires: { $gt: new Date() },
+    }).select('+passwordResetToken +passwordResetExpires');
+
+    if (!user) return res.status(400).json({ message: 'Reset link is invalid or has expired.' });
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    res.status(200).json({ message: 'Password reset successful. You can now sign in.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error.' });
+  }
+};
