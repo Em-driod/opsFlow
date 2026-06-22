@@ -311,8 +311,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
+    await user.updateOne({ $unset: { passwordResetToken: 1, passwordResetExpires: 1 } });
     await user.save();
 
     res.status(200).json({ message: 'Password reset successful. You can now sign in.' });

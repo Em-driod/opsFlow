@@ -13,8 +13,8 @@ export const registerSchema = z.object({
 });
 
 export const createTransactionSchema = z.object({
-  amount: z.number({ required_error: 'Amount is required.' }).positive('Amount must be positive.'),
-  type: z.enum(['income', 'expense'], { required_error: 'Type must be income or expense.' }),
+  amount: z.number({ error: 'Amount is required.' }).positive('Amount must be positive.'),
+  type: z.enum(['income', 'expense'], { error: 'Type must be income or expense.' }),
   description: z.string().min(1, 'Description is required.').trim(),
   category: z.string().optional(),
   clientId: z.string().optional(),
