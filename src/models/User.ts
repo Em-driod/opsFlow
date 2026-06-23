@@ -23,4 +23,6 @@ const UserSchema: Schema = new Schema(
   { timestamps: true },
 );
 
+UserSchema.index({ passwordResetExpires: 1 }, { expireAfterSeconds: 0, sparse: true });
+
 export default mongoose.model<IUser>('User', UserSchema);

@@ -14,12 +14,13 @@ import {
 import { protect, admin } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { loginSchema, registerSchema } from '../middleware/schemas.js';
+import { authLimiter, forgotPasswordLimiter } from '../middleware/rateLimiter.js';
 
 router.route('/').get(protect, admin, getUsers);
-router.post('/register', validate(registerSchema), registerUser);
-router.post('/login', validate(loginSchema), loginUser);
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password/:token', resetPassword);
+router.post('/register', authLimiter, validate(registerSchema), registerUser);
+router.post('/login', authLimiter, validate(loginSchema), loginUser);
+router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
+router.post('/reset-password/:token', authLimiter, resetPassword);
 router.post('/staff', protect, admin, createStaffUser);
 router
   .route('/:id')
