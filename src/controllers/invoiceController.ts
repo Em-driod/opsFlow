@@ -113,15 +113,16 @@ const generateInvoiceNumber = async (): Promise<string> => {
  */
 export const createInvoice = async (req: Request, res: Response) => {
   try {
-    const { 
-      clientId, 
-      customClientName, 
-      lineItems = [], 
-      tax = 0, 
-      dueDate, 
-      notes, 
-      recordAsIncome 
+    const {
+      clientId,
+      customClientName,
+      lineItems = [],
+      tax = 0,
+      dueDate: rawDueDate,
+      notes,
+      recordAsIncome
     } = req.body;
+    const dueDate = rawDueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const user = req.user as any;
 
     const subtotal = lineItems.reduce((acc: number, item: any) => acc + item.total, 0);
