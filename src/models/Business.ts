@@ -20,6 +20,12 @@ export interface IBusinessProfile {
   coverImage?: string;
   logoImage?: string;
   accentColor?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountName?: string;
+  bankName2?: string;
+  accountNumber2?: string;
+  accountName2?: string;
 }
 
 export interface IBusiness extends Document {
@@ -60,6 +66,12 @@ const BusinessSchema: Schema = new Schema(
       coverImage: { type: String },
       logoImage: { type: String },
       accentColor: { type: String, default: '#6366f1' },
+      bankName: { type: String },
+      accountNumber: { type: String },
+      accountName: { type: String },
+      bankName2: { type: String },
+      accountNumber2: { type: String },
+      accountName2: { type: String },
     },
   },
   { timestamps: true },

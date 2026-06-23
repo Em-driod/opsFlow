@@ -307,7 +307,7 @@ export const getPublicInvoice = async (req: Request, res: Response) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
       .populate('clientId', 'name email')
-      .populate('businessId', 'name currency');
+      .populate('businessId', 'name currency profile.bankName profile.accountNumber profile.accountName profile.bankName2 profile.accountNumber2 profile.accountName2');
 
     if (!invoice) {
       return res.status(404).json({ message: 'Invoice not found' });
