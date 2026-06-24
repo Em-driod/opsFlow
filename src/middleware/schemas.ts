@@ -17,8 +17,8 @@ export const createTransactionSchema = z.object({
   type: z.enum(['income', 'expense'], { error: 'Type must be income or expense.' }),
   description: z.string().min(1, 'Description is required.').trim(),
   category: z.string().optional(),
-  clientId: z.string().optional(),
-  projectId: z.string().optional(),
+  clientId: z.string().nullable().optional(),
+  projectId: z.string().nullable().optional(),
   date: z.string().optional(),
 });
 
