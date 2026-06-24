@@ -7,6 +7,7 @@ import { enqueue } from '../services/exportQueueService.js';
 import { fire } from '../services/webhookService.js';
 import { emitToBusiness } from '../services/socketService.js';
 import crypto from 'crypto';
+import { logActivity } from '../utils/activityLogger.js';
 
 // @desc    Create a new client
 // @route   POST /api/clients
@@ -27,6 +28,8 @@ export const createClient = async (req: Request, res: Response) => {
     enqueue({ type: 'client', action: 'created', data: client.toObject(), businessId: String((req.user as any).businessId) });
     fire('client.created', String((req.user as any).businessId), client.toObject());
     emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'created' });
+
+    logActivity({ req, action: 'CREATE', resource: 'CLIENT', resourceId: String(client._id), details: { clientName: name, email, phone } }).catch(() => {});
 
     res.status(201).json(client);
   } catch (error) {
@@ -141,6 +144,7 @@ export const deleteClient = async (req: Request, res: Response) => {
 
     await client.deleteOne();
     emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'client', action: 'deleted' });
+    logActivity({ req, action: 'DELETE', resource: 'CLIENT', resourceId: String(client._id), details: { clientName: client.name } }).catch(() => {});
     res.json({ message: 'Client removed' });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: (error as Error).message });

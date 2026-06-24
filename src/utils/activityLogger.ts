@@ -33,6 +33,7 @@ export const logActivity = async ({
       businessId: req.user.businessId,
       ipAddress: req.ip || req.connection.remoteAddress,
       userAgent: req.get('User-Agent'),
+      timestamp: new Date(),
     });
 
     await activityLog.save();

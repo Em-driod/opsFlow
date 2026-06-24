@@ -9,6 +9,7 @@ import { fire } from '../services/webhookService.js';
 import { emitToBusiness } from '../services/socketService.js';
 import { predictCategory, learnTransactionCategory } from '../services/learningService.js';
 import { inferTaxCategory } from '../services/nigerianTax.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -222,6 +223,8 @@ export const createTransaction = async (req: Request, res: Response) => {
     fire('transaction.created', String(user.businessId), transaction.toObject());
     emitToBusiness(String(user.businessId), 'data_updated', { type: 'transaction', action: 'created' });
 
+    logActivity({ req, action: 'CREATE', resource: 'TRANSACTION', resourceId: String(transaction._id), details: { amount, type, description, category } }).catch(() => {});
+
     res.status(201).json(transaction);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: (error as Error).message });
@@ -341,6 +344,7 @@ export const deleteTransaction = async (req: Request, res: Response) => {
     if (transaction) {
       await transaction.deleteOne();
       emitToBusiness(String((req.user as any).businessId), 'data_updated', { type: 'transaction', action: 'deleted' });
+      logActivity({ req, action: 'DELETE', resource: 'TRANSACTION', resourceId: String(transaction._id), details: { amount: transaction.amount, description: transaction.description } }).catch(() => {});
       res.json({ message: 'Transaction removed' });
     } else {
       res.status(404).json({ message: 'Transaction not found' });
