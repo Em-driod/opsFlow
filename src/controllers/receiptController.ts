@@ -73,7 +73,7 @@ export const sendReceiptByEmail = async (req: Request, res: Response) => {
 
     const business = await Business.findById(businessId).select('name currency').lean();
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-    const publicLink = `${frontendUrl}/#/receipt/${receipt.publicToken}`;
+    const publicLink = `${frontendUrl}/receipt/${receipt.publicToken}`;
 
     const sent = await sendIssuedReceiptEmail({
       recipientEmail: email,

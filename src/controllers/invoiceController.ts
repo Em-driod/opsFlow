@@ -348,7 +348,7 @@ export const sendInvoice = async (req: Request, res: Response) => {
       : invoice.customClientName || 'Valued Client';
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const publicLink = `${frontendUrl}/#/invoice/${invoice._id}`;
+    const publicLink = `${frontendUrl}/invoice/${invoice._id}`;
 
     const sent = await sendInvoiceEmail({
       invoiceNumber: invoice.invoiceNumber,
@@ -409,7 +409,7 @@ export const getWhatsAppLink = async (req: Request, res: Response) => {
       ? (invoice.clientId as any).name
       : invoice.customClientName || 'there';
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const publicLink = `${frontendUrl}/#/invoice/${invoice._id}`;
+    const publicLink = `${frontendUrl}/invoice/${invoice._id}`;
     const dueDate = new Date(invoice.dueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
     const formattedAmount = new Intl.NumberFormat('en-NG', {
@@ -478,7 +478,7 @@ export const initPaystackPayment = async (req: Request, res: Response) => {
           invoice_id: String(invoice._id),
           invoice_number: invoice.invoiceNumber,
         },
-        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#/invoice/${invoice._id}?paid=true`,
+        callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/invoice/${invoice._id}?paid=true`,
       },
       { headers: { Authorization: `Bearer ${paystackKey}`, 'Content-Type': 'application/json' } },
     );
@@ -554,7 +554,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
           total: invoice.total,
           currency: biz.currency || 'NGN',
           paidAt: new Date().toISOString(),
-          publicLink: `${frontendUrl}/#/invoice/${invoice._id}`,
+          publicLink: `${frontendUrl}/invoice/${invoice._id}`,
         }).catch(() => {});
       }
     }

@@ -102,7 +102,7 @@ async function sendInvoiceReminders() {
         total: invoice.total,
         currency: biz?.currency || 'NGN',
         dueDate: invoice.dueDate.toISOString(),
-        publicLink: `${frontendUrl}/#/invoice/${invoice._id}`,
+        publicLink: `${frontendUrl}/invoice/${invoice._id}`,
         type,
       });
       sent++;

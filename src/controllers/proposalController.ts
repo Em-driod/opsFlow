@@ -121,7 +121,7 @@ export const sendProposal = async (req: Request, res: Response) => {
         subtotal: proposal.subtotal,
         tax: proposal.tax,
         ...(proposal.notes ? { notes: proposal.notes } : {}),
-        publicLink: `${frontendUrl}/#/proposal/${proposal._id}`,
+        publicLink: `${frontendUrl}/proposal/${proposal._id}`,
       }).catch(() => false);
     }
 
