@@ -12,6 +12,15 @@ export const registerSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters.').trim(),
 });
 
+export const googleAuthSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required.'),
+});
+
+export const googleSignupSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required.'),
+  businessName: z.string().min(2, 'Business name must be at least 2 characters.').trim(),
+});
+
 export const createTransactionSchema = z.object({
   amount: z.number({ error: 'Amount is required.' }).positive('Amount must be positive.'),
   type: z.enum(['income', 'expense'], { error: 'Type must be income or expense.' }),

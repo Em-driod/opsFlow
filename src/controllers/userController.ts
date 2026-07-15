@@ -7,6 +7,9 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { sendPasswordResetEmail } from '../services/emailService.js';
+import { OAuth2Client } from 'google-auth-library';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_LOGIN_CLIENT_ID);
 
 // @desc    Register a new user and business
 // @route   POST /api/users/register
@@ -68,7 +71,7 @@ export const loginUser = async (req: Request, res: Response) => {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
 
-    if (user && (await bcrypt.compare(password, user.password))) {
+    if (user && user.password && (await bcrypt.compare(password, user.password))) {
       const business = await Business.findById(user.businessId);
       res.json({
         _id: user._id,
@@ -260,6 +263,107 @@ export const deleteUser = async (req: Request, res: Response) => {
     }
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
+  }
+};
+
+// @desc    Sign in / sign up with Google
+// @route   POST /api/users/google
+// @access  Public
+export const googleAuth = async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body as { idToken: string };
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_LOGIN_CLIENT_ID!,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return res.status(400).json({ message: 'Invalid Google token.' });
+    }
+    const { sub: googleId, email, name } = payload;
+
+    let user = await User.findOne({ googleId });
+
+    if (!user) {
+      user = await User.findOne({ email });
+      if (user) {
+        user.googleId = googleId;
+        user.authProvider = 'google';
+        await user.save();
+      }
+    }
+
+    if (!user) {
+      return res.status(200).json({ needsBusinessName: true, googleIdToken: idToken, name, email });
+    }
+
+    const business = await Business.findById(user.businessId);
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      businessId: user.businessId,
+      businessName: business?.name,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(401).json({ message: 'Google authentication failed.' });
+  }
+};
+
+// @desc    Complete Google sign-up by creating a business for a brand-new user
+// @route   POST /api/users/google/complete
+// @access  Public
+export const googleSignupComplete = async (req: Request, res: Response) => {
+  try {
+    const { idToken, businessName } = req.body as { idToken: string; businessName: string };
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_LOGIN_CLIENT_ID!,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return res.status(400).json({ message: 'Invalid Google token.' });
+    }
+    const { sub: googleId, email, name } = payload;
+
+    const existing = await User.findOne({ $or: [{ googleId }, { email }] });
+    if (existing) {
+      return res.status(400).json({ message: 'An account with that Google identity already exists.' });
+    }
+
+    const newBusiness = new Business({ name: businessName });
+
+    const newUser = new User({
+      name: name || email,
+      email,
+      role: 'admin',
+      authProvider: 'google',
+      googleId,
+      businessId: newBusiness._id,
+    });
+
+    newBusiness.owner = newUser._id;
+
+    await newBusiness.save();
+    await newUser.save();
+
+    res.status(201).json({
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      businessId: newUser.businessId,
+      businessName: newBusiness.name,
+      token: generateToken(newUser._id),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error', error: (error as Error).message });
   }
 };
 
