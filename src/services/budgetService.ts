@@ -108,6 +108,17 @@ export const copyBudgetsForBusiness = async (
 
   if (toInsert.length === 0) throw new AppError('All categories already exist for this period', 409);
 
-  const created = await Budget.insertMany(toInsert);
-  return { copied: created.length, budgets: created };
+  try {
+    const created = await Budget.insertMany(toInsert, { ordered: false });
+    return { copied: created.length, budgets: created };
+  } catch (error) {
+    // ordered:false means Mongo attempts every document even after a duplicate-key
+    // conflict — report what actually landed instead of throwing a raw 500 that
+    // hides a partial success (e.g. a race with a second copy/create request).
+    const bulkError = error as { insertedDocs?: unknown[]; code?: number };
+    if (bulkError.code === 11000 && Array.isArray(bulkError.insertedDocs)) {
+      return { copied: bulkError.insertedDocs.length, budgets: bulkError.insertedDocs };
+    }
+    throw error;
+  }
 };
