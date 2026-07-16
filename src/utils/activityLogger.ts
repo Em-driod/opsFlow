@@ -6,7 +6,7 @@ interface LogActivityParams {
   action: 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'VIEW';
   resource: 'USER' | 'CLIENT' | 'TRANSACTION' | 'INVOICE' | 'BUSINESS' | 'PAYROLL';
   resourceId?: string;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 export const logActivity = async ({

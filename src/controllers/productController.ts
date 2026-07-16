@@ -1,47 +1,28 @@
 import type { Request, Response } from 'express';
-import Product from '../models/Product.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
+import * as productService from '../services/productService.js';
 
-export const getProducts = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req as any).user.businessId;
-    const products = await Product.find({ businessId, isActive: true }).sort({ name: 1 });
-    res.json(products);
-  } catch {
-    res.status(500).json({ message: 'Failed to fetch products' });
-  }
-};
+export const getProducts = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const products = await productService.getProductsForBusiness(req.user.businessId);
+  res.json(products);
+});
 
-export const createProduct = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req as any).user.businessId;
-    const product = await Product.create({ ...req.body, businessId });
-    res.status(201).json(product);
-  } catch (err: any) {
-    res.status(400).json({ message: err.message });
-  }
-};
+export const createProduct = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const product = await productService.createProductForBusiness(req.user.businessId, req.body);
+  res.status(201).json(product);
+});
 
-export const updateProduct = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req as any).user.businessId;
-    const product = await Product.findOneAndUpdate(
-      { _id: req.params.id, businessId },
-      req.body,
-      { new: true },
-    );
-    if (!product) return res.status(404).json({ message: 'Product not found' });
-    res.json(product);
-  } catch (err: any) {
-    res.status(400).json({ message: err.message });
-  }
-};
+export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const product = await productService.updateProductForBusiness(req.params.id!, req.user.businessId, req.body);
+  res.json(product);
+});
 
-export const deleteProduct = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req as any).user.businessId;
-    await Product.findOneAndUpdate({ _id: req.params.id, businessId }, { isActive: false });
-    res.json({ message: 'Product removed' });
-  } catch {
-    res.status(500).json({ message: 'Failed to delete product' });
-  }
-};
+export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  await productService.deleteProductForBusiness(req.params.id!, req.user.businessId);
+  res.json({ message: 'Product removed' });
+});

@@ -21,6 +21,25 @@ const SyncEventSchema: Schema = new Schema({
   syncedAt: { type: Date, default: Date.now },
 });
 
+export interface IWebhook {
+  id: string;
+  url: string;
+  events: string[];
+  secret?: string;
+  active: boolean;
+  lastTriggeredAt?: Date;
+  failureCount: number;
+}
+
+export interface ISyncEvent {
+  type: 'transaction' | 'client' | 'invoice' | 'payroll';
+  action: 'created' | 'updated';
+  recordId: string;
+  status: 'synced' | 'pending' | 'failed';
+  error?: string;
+  syncedAt: Date;
+}
+
 export interface IExportConfig extends Document {
   businessId: mongoose.Types.ObjectId;
   googleSheetId: string;
@@ -28,8 +47,8 @@ export interface IExportConfig extends Document {
   sheetsConnected: boolean;
   autoSyncEnabled: boolean;
   lastFullSyncAt?: Date;
-  syncEvents: any[];
-  webhooks: any[];
+  syncEvents: ISyncEvent[];
+  webhooks: IWebhook[];
   googleAccessToken?: string;
   googleRefreshToken?: string;
   googleTokenExpiry?: number;

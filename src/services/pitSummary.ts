@@ -72,8 +72,8 @@ export const computePitSummary = async (businessId: string, taxYear: number): Pr
   let unclassifiedAmount = 0;
 
   for (const tx of transactions) {
-    const stored = (tx as any).taxCategory as NigerianTaxCategory | undefined;
-    const inferred = stored || inferTaxCategory((tx as any).category, tx.type);
+    const stored = tx.taxCategory;
+    const inferred = stored || inferTaxCategory(tx.category, tx.type);
 
     if (!inferred) {
       unclassifiedCount++;
@@ -116,7 +116,7 @@ export const computePitSummary = async (businessId: string, taxYear: number): Pr
 
   let capitalAllowance = 0;
   for (const asset of capitalAssets) {
-    capitalAllowance += computeCapitalAllowance(asset as any, taxYear);
+    capitalAllowance += computeCapitalAllowance(asset, taxYear);
   }
 
   const totalIncome = Math.max(0, grossIncome - totalAllowableExpenses - capitalAllowance);

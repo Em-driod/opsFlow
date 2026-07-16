@@ -168,7 +168,7 @@ export const analyzeCashFlow = async (businessId: string): Promise<CashFlowAnaly
     Transaction.countDocuments({ businessId: businessObjectId, createdAt: { $gte: ninetyDaysAgo } }),
   ]);
   const daysOfHistory = oldestTx
-    ? Math.floor((today.getTime() - new Date((oldestTx as any).createdAt).getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.floor((today.getTime() - new Date(oldestTx.createdAt).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
   const transactionsLast90d = txCountResult || 0;
 

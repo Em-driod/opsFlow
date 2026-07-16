@@ -11,7 +11,7 @@ import {
   payrollToRow,
   SHEET_TABS,
 } from './googleSheetsService.js';
-import ExportConfig from '../models/ExportConfig.js';
+import ExportConfig, { type ISyncEvent } from '../models/ExportConfig.js';
 
 interface SyncJob {
   type: 'transaction' | 'client' | 'invoice' | 'payroll';
@@ -82,12 +82,12 @@ async function processJob(job: SyncJob): Promise<void> {
     const success = await appendRow(job.businessId, sheetId, tabName, row);
 
     // Log the sync event in the config document
-    const eventEntry = {
+    const eventEntry: ISyncEvent = {
       type: job.type,
       action: job.action,
       recordId: String(job.data._id ?? ''),
       status: success ? 'synced' : 'failed',
-      error: success ? undefined : 'Append failed',
+      ...(success ? {} : { error: 'Append failed' }),
       syncedAt: new Date(),
     };
 

@@ -4,7 +4,7 @@ import Transaction from '../models/Transaction.js';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import { writeSummaryRow } from './googleSheetsService.js';
-import { generateDueRecurringInvoices } from '../controllers/recurringInvoiceController.js';
+import { generateDueRecurringInvoices } from './recurringInvoiceService.js';
 import { sendReminderEmail } from './emailService.js';
 
 /**
@@ -78,9 +78,15 @@ async function sendInvoiceReminders() {
 
   try {
     const [upcoming, dueToday, overdue3] = await Promise.all([
-      Invoice.find({ status: 'sent', dueDate: { $gte: in3Days, $lte: in3DaysEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
-      Invoice.find({ status: 'sent', dueDate: { $gte: todayStart, $lte: todayEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
-      Invoice.find({ status: 'overdue', dueDate: { $gte: over3Days, $lte: over3DaysEnd } }).populate('businessId', 'name currency').populate('clientId', 'name email'),
+      Invoice.find({ status: 'sent', dueDate: { $gte: in3Days, $lte: in3DaysEnd } })
+        .populate<{ businessId: { name: string; currency: string } | null }>('businessId', 'name currency')
+        .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email'),
+      Invoice.find({ status: 'sent', dueDate: { $gte: todayStart, $lte: todayEnd } })
+        .populate<{ businessId: { name: string; currency: string } | null }>('businessId', 'name currency')
+        .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email'),
+      Invoice.find({ status: 'overdue', dueDate: { $gte: over3Days, $lte: over3DaysEnd } })
+        .populate<{ businessId: { name: string; currency: string } | null }>('businessId', 'name currency')
+        .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email'),
     ]);
 
     const sendAll = [...upcoming.map(i => ({ invoice: i, type: 'upcoming' as const })),
@@ -89,9 +95,9 @@ async function sendInvoiceReminders() {
 
     let sent = 0;
     for (const { invoice, type } of sendAll) {
-      const biz = invoice.businessId as any;
-      const client = invoice.clientId as any;
-      const email = client?.email || (invoice as any).recipientEmail;
+      const biz = invoice.businessId;
+      const client = invoice.clientId;
+      const email = client?.email || invoice.recipientEmail;
       if (!email) continue;
 
       await sendReminderEmail({

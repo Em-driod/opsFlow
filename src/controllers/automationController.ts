@@ -1,109 +1,34 @@
 import type { Request, Response } from 'express';
-import AutoCommitRule from '../models/AutoCommitRule.js';
-import SmartMapping from '../models/SmartMapping.js';
-import { emitToBusiness } from '../services/socketService.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
+import * as automationService from '../services/automationService.js';
 
-const sanitizeRulePayload = (body: any) => {
-  const out: any = {};
-  if (typeof body.name === 'string') out.name = body.name.trim();
-  if (typeof body.enabled === 'boolean') out.enabled = body.enabled;
-  if (typeof body.vendorPattern === 'string') out.vendorPattern = body.vendorPattern.trim();
-  if (Array.isArray(body.categories)) {
-    out.categories = body.categories.filter((c: any) => typeof c === 'string' && c.trim()).map((c: string) => c.trim());
-  }
-  if (typeof body.maxAmount === 'number' && body.maxAmount >= 0) out.maxAmount = body.maxAmount;
-  if (typeof body.minConfidence === 'number') {
-    out.minConfidence = Math.min(1, Math.max(0, body.minConfidence));
-  }
-  if (body.type === 'income' || body.type === 'expense') out.type = body.type;
-  if (typeof body.defaultCategory === 'string') out.defaultCategory = body.defaultCategory.trim();
-  return out;
-};
+export const listRules = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const rules = await automationService.listRulesForBusiness(req.user.businessId);
+  res.json(rules);
+});
 
-export const listRules = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req.user as any).businessId;
-    const rules = await AutoCommitRule.find({ businessId }).sort({ createdAt: -1 });
-    res.json(rules);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
+export const createRule = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const rule = await automationService.createRuleForBusiness(req.user, req.body);
+  res.status(201).json(rule);
+});
 
-export const createRule = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as any;
-    const data = sanitizeRulePayload(req.body);
-    if (!data.name) {
-      return res.status(400).json({ message: 'Rule name is required' });
-    }
+export const updateRule = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const rule = await automationService.updateRuleForBusiness(req.params.id!, req.user.businessId, req.body);
+  res.json(rule);
+});
 
-    const rule = await AutoCommitRule.create({
-      ...data,
-      businessId: user.businessId,
-      createdBy: user._id,
-    });
+export const getLearningStats = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const stats = await automationService.getLearningStatsForBusiness(req.user.businessId);
+  res.json(stats);
+});
 
-    emitToBusiness(String(user.businessId), 'data_updated', { type: 'autoRule', action: 'created' });
-
-    res.status(201).json(rule);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
-
-export const updateRule = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as any;
-    const data = sanitizeRulePayload(req.body);
-
-    const rule = await AutoCommitRule.findOneAndUpdate(
-      { _id: req.params.id, businessId: user.businessId },
-      { $set: data },
-      { new: true },
-    );
-
-    if (!rule) {
-      return res.status(404).json({ message: 'Rule not found' });
-    }
-
-    emitToBusiness(String(user.businessId), 'data_updated', { type: 'autoRule', action: 'updated' });
-
-    res.json(rule);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
-
-export const getLearningStats = async (req: Request, res: Response) => {
-  try {
-    const businessId = (req.user as any).businessId;
-    const [patternCount, highConfidenceCount] = await Promise.all([
-      SmartMapping.countDocuments({ businessId }),
-      SmartMapping.countDocuments({ businessId, confidenceScore: { $gte: 3 } }),
-    ]);
-    res.json({ patternCount, highConfidenceCount });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
-
-export const deleteRule = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as any;
-    const rule = await AutoCommitRule.findOneAndDelete({
-      _id: req.params.id,
-      businessId: user.businessId,
-    });
-
-    if (!rule) {
-      return res.status(404).json({ message: 'Rule not found' });
-    }
-
-    emitToBusiness(String(user.businessId), 'data_updated', { type: 'autoRule', action: 'deleted' });
-
-    res.json({ message: 'Rule deleted' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
+export const deleteRule = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  await automationService.deleteRuleForBusiness(req.params.id!, req.user.businessId);
+  res.json({ message: 'Rule deleted' });
+});

@@ -25,6 +25,9 @@ export interface ITransaction extends Document {
   isReconciled?: boolean;
   source?: 'manual' | 'bank_sync' | 'ocr_scan' | 'csv_import';
   receiptImage?: string;
+
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const TransactionSchema: Schema = new Schema(

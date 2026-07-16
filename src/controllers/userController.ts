@@ -1,424 +1,162 @@
 import type { Request, Response } from 'express';
-import User from '../models/User.js';
-import Business from '../models/Business.js';
 import { logActivity } from '../utils/activityLogger.js';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import mongoose from 'mongoose';
-import crypto from 'crypto';
-import { sendPasswordResetEmail } from '../services/emailService.js';
-import { OAuth2Client } from 'google-auth-library';
-
-const googleClient = new OAuth2Client(process.env.GOOGLE_LOGIN_CLIENT_ID);
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
+import * as userService from '../services/userService.js';
 
 // @desc    Register a new user and business
 // @route   POST /api/users/register
 // @access  Public
-export const registerUser = async (req: Request, res: Response) => {
-  try {
-    const { name, email, password, businessName } = req.body;
-
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: 'User with that email already exists' });
-    }
-
-    if (!businessName) {
-      return res.status(400).json({ message: 'Business name is required' });
-    }
-
-    // Create the business first
-    const newBusiness = new Business({ name: businessName });
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Create the user
-    const newUser = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role: 'admin', // The first user is the admin
-      businessId: newBusiness._id,
-    });
-
-    // Now set the owner on the business and save both
-    newBusiness.owner = newUser._id;
-
-    await newBusiness.save();
-    await newUser.save();
-
-    res.status(201).json({
-      _id: newUser._id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      businessId: newUser.businessId,
-      businessName: newBusiness.name,
-      token: generateToken(newUser._id),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
+export const registerUser = asyncHandler(async (req: Request, res: Response) => {
+  const { name, email, password, businessName } = req.body;
+  const result = await userService.registerUser({ name, email, password, businessName });
+  res.status(201).json(result);
+});
 
 // @desc    Auth user & get token
 // @route   POST /api/users/login
 // @access  Public
-export const loginUser = async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-
-    if (user && user.password && (await bcrypt.compare(password, user.password))) {
-      const business = await Business.findById(user.businessId);
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        businessId: user.businessId,
-        businessName: business?.name,
-        token: generateToken(user._id),
-      });
-    } else {
-      res.status(401).json({ message: 'Invalid email or password' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
-  }
-};
+export const loginUser = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  const result = await userService.loginUser(email, password);
+  res.json(result);
+});
 
 // @desc    Create a staff user for existing business
 // @route   POST /api/users/staff
 // @access  Private/Admin
-export const createStaffUser = async (req: Request, res: Response) => {
-  try {
-    const { name, email, password, role, businessId } = req.body;
+export const createStaffUser = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const { name, email, password, role, businessId } = req.body;
+  const savedUser = await userService.createStaffUser(req.user, { name, email, password, role, businessId });
 
-    // Verify the user is admin and businessId matches
-    if (!req.user?.businessId || req.user.role !== 'admin') {
-      return res.status(401).json({ message: 'Not authorized - admin access required' });
-    }
+  await logActivity({
+    req,
+    action: 'CREATE',
+    resource: 'USER',
+    resourceId: savedUser._id.toString(),
+    details: { createdUserName: name, createdUserEmail: email, createdUserRole: role || 'staff' },
+  });
 
-    // Compare businessId as strings since frontend sends it as string
-    if (req.user.businessId.toString() !== businessId) {
-      return res.status(401).json({ message: 'Not authorized to create users for this business' });
-    }
-
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: 'User with that email already exists' });
-    }
-
-    if (!password) {
-      return res.status(400).json({ message: 'Password is required' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const newUser = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role: role || 'staff',
-      businessId: req.user.businessId, // Use the authenticated user's businessId
-    });
-
-    const savedUser = await newUser.save();
-
-    // Log the activity
-    await logActivity({
-      req,
-      action: 'CREATE',
-      resource: 'USER',
-      resourceId: savedUser._id.toString(),
-      details: {
-        createdUserName: name,
-        createdUserEmail: email,
-        createdUserRole: role || 'staff'
-      }
-    });
-
-    res.status(201).json({
-      _id: savedUser._id,
-      name: savedUser.name,
-      email: savedUser.email,
-      role: savedUser.role,
-      businessId: savedUser.businessId,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
-  }
-};
+  res.status(201).json({
+    _id: savedUser._id,
+    name: savedUser.name,
+    email: savedUser.email,
+    role: savedUser.role,
+    businessId: savedUser.businessId,
+  });
+});
 
 // @desc    Get all users for a business
 // @route   GET /api/users
 // @access  Private/Admin
-export const getUsers = async (req: Request, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: 'Not authorized' });
-    }
-    const users = await User.find({ businessId: req.user.businessId }).select('-password');
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
-  }
-};
+export const getUsers = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const users = await userService.getUsersForBusiness(req.user.businessId);
+  res.json(users);
+});
 
 // @desc    Get user by ID
 // @route   GET /api/users/:id
-// @access  Private/Admin
-export const getUserById = async (req: Request, res: Response) => {
-  try {
-    const user = await User.findById(req.params.id).select('-password');
-    if (user) {
-      res.json(user);
-    } else {
-      res.status(404).json({ message: 'User not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
-  }
-};
+// @access  Private (same business only)
+export const getUserById = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const user = await userService.getUserByIdForBusiness(req.params.id!, req.user.businessId);
+  res.json(user);
+});
 
 // @desc    Update user
 // @route   PUT /api/users/:id
-// @access  Private
-export const updateUser = async (req: Request, res: Response) => {
-  try {
-    const user = await User.findById(req.params.id);
+// @access  Private (self, or admin within same business). Only admins may change role.
+export const updateUser = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const updatedUser = await userService.updateUserForBusiness(req.user, req.params.id!, req.body);
 
-    if (user) {
-      user.name = req.body.name || user.name;
-      user.email = req.body.email || user.email;
-      user.role = req.body.role || user.role;
-      if (req.body.password) {
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(req.body.password, salt);
-      }
-
-      const updatedUser = await user.save();
-
-      // Log the activity
-      await logActivity({
-        req,
-        action: 'UPDATE',
-        resource: 'USER',
-        resourceId: updatedUser._id.toString(),
-        details: {
-          updatedFields: {
-            name: req.body.name || user.name,
-            email: req.body.email || user.email,
-            role: req.body.role || user.role,
-            passwordChanged: !!req.body.password
-          }
-        }
-      });
-
-      res.json({
-        _id: updatedUser._id,
+  await logActivity({
+    req,
+    action: 'UPDATE',
+    resource: 'USER',
+    resourceId: updatedUser._id.toString(),
+    details: {
+      updatedFields: {
         name: updatedUser.name,
         email: updatedUser.email,
         role: updatedUser.role,
-        businessId: updatedUser.businessId,
-      });
-    } else {
-      res.status(404).json({ message: 'User not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
-  }
-};
+        passwordChanged: !!req.body.password,
+      },
+    },
+  });
+
+  res.json({
+    _id: updatedUser._id,
+    name: updatedUser.name,
+    email: updatedUser.email,
+    role: updatedUser.role,
+    businessId: updatedUser.businessId,
+  });
+});
 
 // @desc    Delete user
 // @route   DELETE /api/users/:id
-// @access  Private/Admin
-export const deleteUser = async (req: Request, res: Response) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (user) {
-      await user.deleteOne();
+// @access  Private/Admin (same business only)
+export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const user = await userService.deleteUserForBusiness(req.params.id!, req.user.businessId);
 
-      // Log the activity
-      await logActivity({
-        req,
-        action: 'DELETE',
-        resource: 'USER',
-        resourceId: user._id.toString(),
-        details: {
-          deletedUserName: user.name,
-          deletedUserEmail: user.email,
-          deletedUserRole: user.role
-        }
-      });
+  await logActivity({
+    req,
+    action: 'DELETE',
+    resource: 'USER',
+    resourceId: user._id.toString(),
+    details: { deletedUserName: user.name, deletedUserEmail: user.email, deletedUserRole: user.role },
+  });
 
-      res.json({ message: 'User removed' });
-    } else {
-      res.status(404).json({ message: 'User not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error });
-  }
-};
+  res.json({ message: 'User removed' });
+});
 
 // @desc    Sign in / sign up with Google
 // @route   POST /api/users/google
 // @access  Public
-export const googleAuth = async (req: Request, res: Response) => {
+export const googleAuth = asyncHandler(async (req: Request, res: Response) => {
+  const { idToken } = req.body as { idToken: string };
   try {
-    const { idToken } = req.body as { idToken: string };
-
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_LOGIN_CLIENT_ID!,
-    });
-    const payload = ticket.getPayload();
-    if (!payload?.email) {
-      return res.status(400).json({ message: 'Invalid Google token.' });
-    }
-    const { sub: googleId, email, name } = payload;
-
-    let user = await User.findOne({ googleId });
-
-    if (!user) {
-      user = await User.findOne({ email });
-      if (user) {
-        user.googleId = googleId;
-        user.authProvider = 'google';
-        await user.save();
-      }
-    }
-
-    if (!user) {
-      return res.status(200).json({ needsBusinessName: true, googleIdToken: idToken, name, email });
-    }
-
-    const business = await Business.findById(user.businessId);
-    res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      businessId: user.businessId,
-      businessName: business?.name,
-      token: generateToken(user._id),
-    });
+    const result = await userService.googleAuth(idToken);
+    res.json(result);
   } catch (error) {
     console.error(error);
-    res.status(401).json({ message: 'Google authentication failed.' });
+    throw new AppError('Google authentication failed.', 401);
   }
-};
+});
 
 // @desc    Complete Google sign-up by creating a business for a brand-new user
 // @route   POST /api/users/google/complete
 // @access  Public
-export const googleSignupComplete = async (req: Request, res: Response) => {
+export const googleSignupComplete = asyncHandler(async (req: Request, res: Response) => {
+  const { idToken, businessName } = req.body as { idToken: string; businessName: string };
+  const result = await userService.googleSignupComplete(idToken, businessName);
+  res.status(201).json(result);
+});
+
+// @desc    Request a password reset email
+// @route   POST /api/users/forgot-password
+// @access  Public
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = req.body as { email: string };
   try {
-    const { idToken, businessName } = req.body as { idToken: string; businessName: string };
-
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_LOGIN_CLIENT_ID!,
-    });
-    const payload = ticket.getPayload();
-    if (!payload?.email) {
-      return res.status(400).json({ message: 'Invalid Google token.' });
-    }
-    const { sub: googleId, email, name } = payload;
-
-    const existing = await User.findOne({ $or: [{ googleId }, { email }] });
-    if (existing) {
-      return res.status(400).json({ message: 'An account with that Google identity already exists.' });
-    }
-
-    const newBusiness = new Business({ name: businessName });
-
-    const newUser = new User({
-      name: name || email,
-      email,
-      role: 'admin',
-      authProvider: 'google',
-      googleId,
-      businessId: newBusiness._id,
-    });
-
-    newBusiness.owner = newUser._id;
-
-    await newBusiness.save();
-    await newUser.save();
-
-    res.status(201).json({
-      _id: newUser._id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      businessId: newUser.businessId,
-      businessName: newBusiness.name,
-      token: generateToken(newUser._id),
-    });
+    await userService.requestPasswordReset(email);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Server error', error: (error as Error).message });
+    // Fall through — always return 200 so the response never reveals whether the email exists.
   }
-};
+  res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+});
 
-// Generate JWT
-const generateToken = (id: mongoose.Types.ObjectId) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET!, {
-    expiresIn: '30d',
-  });
-};
-
-export const forgotPassword = async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body as { email: string };
-    const user = await User.findOne({ email: email?.toLowerCase().trim() }).select('+passwordResetToken +passwordResetExpires');
-    // Always return 200 — don't reveal whether the email exists
-    if (!user) return res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
-
-    const token = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = crypto.createHash('sha256').update(token).digest('hex');
-    user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    await user.save();
-
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-    await sendPasswordResetEmail({ email: user.email, name: user.name, resetUrl });
-
-    res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error.' });
-  }
-};
-
-export const resetPassword = async (req: Request, res: Response) => {
-  try {
-    const { token } = req.params as { token: string };
-    const { password } = req.body as { password: string };
-
-    if (!password || password.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
-    }
-
-    const hashed = crypto.createHash('sha256').update(token).digest('hex');
-    const user = await User.findOne({
-      passwordResetToken: hashed,
-      passwordResetExpires: { $gt: new Date() },
-    }).select('+passwordResetToken +passwordResetExpires');
-
-    if (!user) return res.status(400).json({ message: 'Reset link is invalid or has expired.' });
-
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-    await user.updateOne({ $unset: { passwordResetToken: 1, passwordResetExpires: 1 } });
-    await user.save();
-
-    res.status(200).json({ message: 'Password reset successful. You can now sign in.' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error.' });
-  }
-};
+// @desc    Reset password using a reset token
+// @route   POST /api/users/reset-password/:token
+// @access  Public
+export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.params as { token: string };
+  const { password } = req.body as { password: string };
+  await userService.resetPasswordWithToken(token, password);
+  res.status(200).json({ message: 'Password reset successful. You can now sign in.' });
+});

@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
-import jwt from 'jsonwebtoken';
+import jwt, { type JwtPayload } from 'jsonwebtoken';
+import User from '../models/User.js';
 
 let io: SocketIOServer | null = null;
 
@@ -13,15 +14,20 @@ export const initSocketServer = (server: HTTPServer) => {
   });
 
   // Authentication Middleware for Sockets
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
       return next(new Error('Authentication error'));
     }
 
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as any;
-      socket.data.user = decoded; // Store user data in socket
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as JwtPayload;
+      // The JWT only carries { id } — look up businessId so the socket can join its room.
+      const user = await User.findById(decoded.id).select('businessId');
+      if (!user) {
+        return next(new Error('Authentication error'));
+      }
+      socket.data.user = { id: String(user._id), businessId: String(user.businessId) };
       next();
     } catch (err) {
       next(new Error('Authentication error'));

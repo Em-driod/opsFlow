@@ -2,6 +2,8 @@
 export default {
   testEnvironment: 'node',
   extensionsToTreatAsEsm: ['.ts'],
+  setupFiles: ['<rootDir>/src/testUtils/jest.setup.ts'],
+  testTimeout: 60000,
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
