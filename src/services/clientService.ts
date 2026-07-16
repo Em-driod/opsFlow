@@ -8,10 +8,25 @@ import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { AppError } from '../utils/AppError.js';
 
+const assertEmailNotTaken = async (
+  businessId: mongoose.Types.ObjectId,
+  email: string | undefined,
+  excludeClientId?: string,
+) => {
+  if (!email) return;
+  const filter: Record<string, unknown> = { businessId, email };
+  if (excludeClientId) filter._id = { $ne: excludeClientId };
+  const existing = await Client.findOne(filter).select('name');
+  if (existing) {
+    throw new AppError(`You already have a client with this email — ${existing.name}.`, 400);
+  }
+};
+
 export const createClient = async (
   businessId: mongoose.Types.ObjectId,
   params: { name: string; email?: string; phone?: string; businessValue?: number; status?: string },
 ) => {
+  await assertEmailNotTaken(businessId, params.email);
   const client = await Client.create({ ...params, businessId });
 
   enqueue({ type: 'client', action: 'created', data: client.toObject(), businessId: String(businessId) });
@@ -56,6 +71,10 @@ export const updateClientForBusiness = async (
 ) => {
   const client = await Client.findOne({ _id: id, businessId });
   if (!client) throw new AppError('Client not found', 404);
+
+  if (updates.email && updates.email !== client.email) {
+    await assertEmailNotTaken(businessId, updates.email, id);
+  }
 
   if (updates.name) client.name = updates.name;
   if (updates.email) client.email = updates.email;
