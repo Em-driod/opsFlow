@@ -1,32 +1,51 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import Receipt from '../models/Receipt.js';
+import type { IReceiptItem } from '../models/Receipt.js';
 import Business from '../models/Business.js';
-import Counter from '../models/Counter.js';
 import { sendIssuedReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
 
 export const getReceiptsForBusiness = (businessId: mongoose.Types.ObjectId) =>
   Receipt.find({ businessId }).sort({ createdAt: -1 });
 
+// Opaque, non-sequential receipt number: date-stamped + random suffix.
+// Doesn't leak how many receipts a business has issued, unlike an incrementing counter.
+const generateReceiptNumber = () => {
+  const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
+  const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 hex chars
+  return `RCP-${datePart}-${randomPart}`;
+};
+
 export const createReceiptForBusiness = async (businessId: mongoose.Types.ObjectId, body: Record<string, unknown>) => {
   try {
-    const COUNTER_ID = `receipts_${businessId}`;
-    const exists = await Counter.exists({ _id: COUNTER_ID });
-    if (!exists) {
-      const existing = await Receipt.countDocuments({ businessId });
-      try {
-        await Counter.create({ _id: COUNTER_ID, seq: existing });
-      } catch (e) {
-        if ((e as { code?: number }).code !== 11000) throw e;
-      }
-    }
-    const counter = await Counter.findOneAndUpdate({ _id: COUNTER_ID }, { $inc: { seq: 1 } }, { new: true });
-    const receiptNumber = `RCP-${counter!.seq.toString().padStart(4, '0')}`;
+    const items = Array.isArray(body.items) ? (body.items as IReceiptItem[]) : [];
+    const transactionIds = Array.isArray(body.transactionIds) ? (body.transactionIds as string[]) : undefined;
+    const amount = items.length > 0 ? items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) : Number(body.amount);
+
     const publicToken = crypto.randomBytes(20).toString('hex');
 
-    return await Receipt.create({ ...body, businessId, receiptNumber, publicToken });
+    // Collision odds are astronomically low, but retry once just in case.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await Receipt.create({
+          ...body,
+          items,
+          transactionIds,
+          transactionId: transactionIds?.[0] ?? body.transactionId,
+          amount,
+          businessId,
+          receiptNumber: generateReceiptNumber(),
+          publicToken,
+        });
+      } catch (e) {
+        if ((e as { code?: number }).code === 11000 && attempt < 2) continue;
+        throw e;
+      }
+    }
+    throw new AppError('Could not generate a unique receipt number, please try again', 500);
   } catch (err) {
+    if (err instanceof AppError) throw err;
     throw new AppError((err as Error).message, 400);
   }
 };

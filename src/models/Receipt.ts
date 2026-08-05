@@ -1,9 +1,16 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface IReceiptItem {
+  description: string;
+  amount: number;
+}
+
 export interface IReceipt extends Document {
   receiptNumber: string;
   businessId: mongoose.Types.ObjectId;
   transactionId?: mongoose.Types.ObjectId;
+  transactionIds: mongoose.Types.ObjectId[];
+  items: IReceiptItem[];
   payerName: string;
   payerEmail?: string;
   payerPhone?: string;
@@ -16,11 +23,21 @@ export interface IReceipt extends Document {
   createdAt: Date;
 }
 
+const ReceiptItemSchema = new Schema<IReceiptItem>(
+  {
+    description: { type: String, required: true },
+    amount: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
 const ReceiptSchema: Schema = new Schema(
   {
-    receiptNumber: { type: String, required: true },
+    receiptNumber: { type: String, required: true, unique: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business', required: true },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    transactionIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }],
+    items: { type: [ReceiptItemSchema], default: [] },
     payerName: { type: String, required: true },
     payerEmail: { type: String },
     payerPhone: { type: String },
