@@ -1,6 +1,9 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import userRoutes from '../routes/userRoutes.js';
 import businessRoutes from '../routes/businessRoutes.js';
+import invoiceRoutes from '../routes/invoiceRoutes.js';
+import payrollRoutes from '../routes/payrollRoutes.js';
+import taxRoutes from '../routes/taxRoutes.js';
 import { protect, admin } from '../middleware/auth.js';
 import { sanitizeBody } from '../middleware/sanitize.js';
 
@@ -10,6 +13,9 @@ export const createTestApp = () => {
   app.use(sanitizeBody);
   app.use('/api/users', userRoutes);
   app.use('/api/businesses', businessRoutes);
+  app.use('/api/invoices', invoiceRoutes);
+  app.use('/api/payrolls', payrollRoutes);
+  app.use('/api/tax', taxRoutes);
 
   // Minimal routes for exercising the auth middleware directly.
   app.get('/api/test/protected', protect, (req: Request, res: Response) => {
