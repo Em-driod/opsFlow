@@ -5,7 +5,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import Invoice, { type IInvoice } from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 import Business from '../models/Business.js';
-import Counter from '../models/Counter.js';
 import { createNotification } from '../services/notificationService.js';
 import { enqueue } from './exportQueueService.js';
 import { fire } from './webhookService.js';
@@ -73,25 +72,20 @@ const extractInvoiceWithVision = async (buffer: Buffer, mimeType: string): Promi
 };
 
 /**
- * Generate a unique invoice number using an atomic counter.
- * On first use, seeds the counter from the existing invoice count
- * so numbers never collide with pre-existing records.
+ * Opaque, non-sequential invoice number: date-stamped + random suffix.
+ * A sequential counter (INV-0001, INV-0002...) would leak how many invoices
+ * a business has issued to anyone who sees one. Mirrors the receipt-number
+ * scheme in receiptService.ts.
  */
 const generateInvoiceNumber = async (): Promise<string> => {
-  const COUNTER_ID = 'invoices';
-
-  const exists = await Counter.exists({ _id: COUNTER_ID });
-  if (!exists) {
-    const existingCount = await Invoice.countDocuments();
-    try {
-      await Counter.create({ _id: COUNTER_ID, seq: existingCount });
-    } catch (e) {
-      if ((e as { code?: number }).code !== 11000) throw e;
-    }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
+    const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 hex chars
+    const invoiceNumber = `INV-${datePart}-${randomPart}`;
+    const exists = await Invoice.exists({ invoiceNumber });
+    if (!exists) return invoiceNumber;
   }
-
-  const counter = await Counter.findOneAndUpdate({ _id: COUNTER_ID }, { $inc: { seq: 1 } }, { new: true });
-  return `INV-${counter!.seq.toString().padStart(4, '0')}`;
+  throw new AppError('Could not generate a unique invoice number, please try again', 500);
 };
 
 export const scanInvoiceImage = async (buffer: Buffer, mimetype: string) => {
