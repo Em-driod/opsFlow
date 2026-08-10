@@ -79,7 +79,7 @@ describe('GET /api/tax/pit/summary', () => {
       category: 'Client payment',
       taxCategory: 'income_business',
       recordedBy: a.admin._id,
-      createdAt: inYear,
+      date: inYear,
     });
     // A second business's income must not leak into A's tax summary.
     await Transaction.create({
@@ -89,7 +89,7 @@ describe('GET /api/tax/pit/summary', () => {
       category: 'Client payment',
       taxCategory: 'income_business',
       recordedBy: b.admin._id,
-      createdAt: inYear,
+      date: inYear,
     });
 
     const res = await request(app)
@@ -111,7 +111,7 @@ describe('GET /api/tax/pit/summary', () => {
       category: 'Client payment',
       taxCategory: 'income_business',
       recordedBy: admin._id,
-      createdAt: new Date(Date.UTC(year - 1, 5, 1)),
+      date: new Date(Date.UTC(year - 1, 5, 1)),
     });
 
     const res = await request(app)
@@ -132,7 +132,7 @@ describe('GET /api/tax/pit/summary', () => {
       type: 'expense',
       category: 'xyzzy something with no keyword match',
       recordedBy: admin._id,
-      createdAt: new Date(Date.UTC(year, 3, 1)),
+      date: new Date(Date.UTC(year, 3, 1)),
     });
 
     const res = await request(app)
@@ -162,7 +162,7 @@ describe('GET /api/tax/pit/export.csv', () => {
       category: 'Client payment',
       taxCategory: 'income_business',
       recordedBy: admin._id,
-      createdAt: new Date(Date.UTC(year, 2, 1)),
+      date: new Date(Date.UTC(year, 2, 1)),
     });
 
     const res = await request(app)

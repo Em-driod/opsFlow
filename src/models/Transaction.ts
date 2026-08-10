@@ -9,6 +9,7 @@ export interface ITransaction extends Document {
   type: 'income' | 'expense';
   category: string;
   description?: string;
+  date: Date;
   recordedBy: mongoose.Types.ObjectId;
 
   // ─── Tax Fields (Nigerian PIT/CIT/VAT) ────────────────────────────────────
@@ -39,6 +40,9 @@ const TransactionSchema: Schema = new Schema(
     type: { type: String, enum: ['income', 'expense'], required: true },
     category: { type: String },
     description: { type: String },
+    // The date the transaction actually happened (user-editable), distinct from
+    // createdAt (when the record was inserted). Reports filter by this field.
+    date: { type: Date, required: true, default: Date.now },
     recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
     // Nigerian tax fields
@@ -62,6 +66,7 @@ const TransactionSchema: Schema = new Schema(
 
 // Index for fast bank-sync deduplication lookups
 TransactionSchema.index({ businessId: 1, createdAt: -1 });
+TransactionSchema.index({ businessId: 1, date: -1 });
 TransactionSchema.index({ plaidTransactionId: 1 }, { sparse: true });
 
 export default mongoose.model<ITransaction>('Transaction', TransactionSchema);

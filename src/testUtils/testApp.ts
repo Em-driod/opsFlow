@@ -4,6 +4,8 @@ import businessRoutes from '../routes/businessRoutes.js';
 import invoiceRoutes from '../routes/invoiceRoutes.js';
 import payrollRoutes from '../routes/payrollRoutes.js';
 import taxRoutes from '../routes/taxRoutes.js';
+import transactionRoutes from '../routes/transactionRoutes.js';
+import reportingRoutes from '../routes/reportingRoutes.js';
 import { protect, admin } from '../middleware/auth.js';
 import { sanitizeBody } from '../middleware/sanitize.js';
 
@@ -16,6 +18,8 @@ export const createTestApp = () => {
   app.use('/api/invoices', invoiceRoutes);
   app.use('/api/payrolls', payrollRoutes);
   app.use('/api/tax', taxRoutes);
+  app.use('/api/transactions', transactionRoutes);
+  app.use('/api/reporting', reportingRoutes);
 
   // Minimal routes for exercising the auth middleware directly.
   app.get('/api/test/protected', protect, (req: Request, res: Response) => {

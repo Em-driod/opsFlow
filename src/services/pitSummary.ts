@@ -62,7 +62,7 @@ export const computePitSummary = async (businessId: string, taxYear: number): Pr
   const [transactions, capitalAssets] = await Promise.all([
     Transaction.find({
       businessId: businessObjectId,
-      createdAt: { $gte: start, $lte: end },
+      date: { $gte: start, $lte: end },
     }).select('amount type category description taxCategory').lean(),
     CapitalAsset.find({ businessId: businessObjectId }).lean(),
   ]);

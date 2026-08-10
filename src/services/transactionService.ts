@@ -158,12 +158,13 @@ export const createTransactionForBusiness = async (
     type: 'income' | 'expense';
     category: string;
     description?: string;
+    date?: string;
     taxCategory?: NigerianTaxCategory;
     vatable?: boolean;
     vatAmount?: number;
   },
 ) => {
-  const { clientId, projectId, amount, type, category, description, taxCategory, vatable, vatAmount } = params;
+  const { clientId, projectId, amount, type, category, description, date, taxCategory, vatable, vatAmount } = params;
   const user = req.user;
 
   const finalTaxCategory = taxCategory || inferTaxCategory(category || description, type) || undefined;
@@ -176,6 +177,7 @@ export const createTransactionForBusiness = async (
     type,
     category,
     description,
+    date: date ? new Date(date) : new Date(),
     recordedBy: user._id,
     source: 'manual',
     ...(finalTaxCategory ? { taxCategory: finalTaxCategory } : {}),
@@ -238,6 +240,7 @@ export const updateTransactionForBusiness = async (
   transaction.type = updates.type || transaction.type;
   transaction.category = updates.category || transaction.category;
   if (updates.description !== undefined) transaction.description = updates.description;
+  if (updates.date) transaction.date = new Date(updates.date as unknown as string);
   if (updates.clientId !== undefined) transaction.clientId = updates.clientId || undefined;
   if (updates.projectId !== undefined) transaction.projectId = updates.projectId || undefined;
   if (updates.taxCategory !== undefined) transaction.taxCategory = updates.taxCategory || undefined;

@@ -15,7 +15,7 @@ export const getFinancialSummaryForBusiness = async (
   end.setHours(23, 59, 59, 999);
 
   const pipeline: mongoose.PipelineStage[] = [
-    { $match: { businessId: new mongoose.Types.ObjectId(businessId), createdAt: { $gte: start, $lte: end } } },
+    { $match: { businessId: new mongoose.Types.ObjectId(businessId), date: { $gte: start, $lte: end } } },
   ];
 
   if (groupBy === 'category') {
@@ -97,7 +97,7 @@ export const getDetailedTransactionsForBusiness = async (
 
   const transactionsQuery = Transaction.find({
     businessId: new mongoose.Types.ObjectId(businessId),
-    createdAt: { $gte: start, $lte: end },
+    date: { $gte: start, $lte: end },
   }).sort({ date: 1 });
 
   if (groupBy === 'client') {
