@@ -111,16 +111,25 @@ export const getPublicProfileBySlug = async (slug: string) => {
   const business = await Business.findOne({ slug });
   if (!business || !business.profile?.isPublic) throw new AppError('Profile not found', 404);
 
+  // Fire-and-forget — a slow/failed view count shouldn't hold up or break the page load.
+  Business.updateOne({ _id: business._id }, { $inc: { profileViews: 1 } }).catch(() => {});
+
   // Catalog items are the source of truth — a business only has to enter a
   // product once (in Catalog) for it to show up here, instead of re-typing it
   // into the profile's manual "services" list too. Catalog items are shown
   // first, with any hand-curated services (e.g. bundled packages) after.
   const catalogItems = await Product.find({ businessId: business._id, isActive: true, showOnProfile: true })
     .sort({ name: 1 })
-    .select('name description price image');
+    .select('name description price image trackStock stock');
 
   const services = [
-    ...catalogItems.map((p) => ({ name: p.name, description: p.description, price: p.price, image: p.image })),
+    ...catalogItems.map((p) => ({
+      name: p.name,
+      description: p.description,
+      price: p.price,
+      image: p.image,
+      inStock: p.trackStock ? p.stock : undefined,
+    })),
     ...(business.profile?.services ?? []),
   ];
 

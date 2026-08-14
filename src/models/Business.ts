@@ -36,6 +36,7 @@ export interface IBusiness extends Document {
   currency: string;
   slug?: string;
   profile: IBusinessProfile;
+  profileViews: number;
 }
 
 const ServiceItemSchema = new Schema({
@@ -53,6 +54,7 @@ const BusinessSchema: Schema = new Schema(
     clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
     currency: { type: String, required: true, default: 'USD' },
     slug: { type: String, unique: true, sparse: true },
+    profileViews: { type: Number, default: 0 },
     profile: {
       tagline: { type: String },
       description: { type: String },
