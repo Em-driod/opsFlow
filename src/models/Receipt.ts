@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IReceiptItem {
   description: string;
   amount: number;
+  productId?: mongoose.Types.ObjectId;
+  quantity?: number;
 }
 
 export interface IReceipt extends Document {
@@ -27,6 +29,8 @@ const ReceiptItemSchema = new Schema<IReceiptItem>(
   {
     description: { type: String, required: true },
     amount: { type: Number, required: true },
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    quantity: { type: Number },
   },
   { _id: false }
 );

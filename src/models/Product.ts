@@ -9,6 +9,8 @@ export interface IProduct extends Document {
   category?: string;
   image?: string;
   isActive: boolean;
+  trackStock: boolean;
+  stock: number;
 }
 
 const ProductSchema: Schema = new Schema(
@@ -21,6 +23,8 @@ const ProductSchema: Schema = new Schema(
     category: { type: String },
     image: { type: String },
     isActive: { type: Boolean, default: true },
+    trackStock: { type: Boolean, default: false },
+    stock: { type: Number, default: 0 },
   },
   { timestamps: true },
 );

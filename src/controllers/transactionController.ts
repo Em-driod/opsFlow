@@ -51,13 +51,17 @@ export const createTransaction = asyncHandler(async (req: Request, res: Response
 // @access  Private
 export const getTransactions = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
-  const { clientId, projectId, page, limit, search } = req.query;
+  const { clientId, projectId, page, limit, search, category, type, startDate, endDate } = req.query;
   const result = await transactionService.getTransactionsForBusiness(req.user.businessId, {
     clientId: clientId as string,
     projectId: projectId as string,
     page: page as string,
     limit: limit as string,
     search: search as string,
+    category: category as string,
+    type: type as string,
+    startDate: startDate as string,
+    endDate: endDate as string,
   });
   res.json(result);
 });

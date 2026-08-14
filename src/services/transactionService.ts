@@ -203,15 +203,33 @@ export const createTransactionForBusiness = async (
 
 export const getTransactionsForBusiness = async (
   businessId: mongoose.Types.ObjectId,
-  params: { clientId?: string; projectId?: string; page?: string; limit?: string; search?: string },
+  params: {
+    clientId?: string;
+    projectId?: string;
+    page?: string;
+    limit?: string;
+    search?: string;
+    category?: string;
+    type?: string;
+    startDate?: string;
+    endDate?: string;
+  },
 ) => {
   const filter: Record<string, unknown> = { businessId };
   if (params.clientId) filter.clientId = params.clientId;
   if (params.projectId) filter.projectId = params.projectId;
   if (params.search) filter.description = { $regex: String(params.search), $options: 'i' };
+  if (params.category) filter.category = params.category;
+  if (params.type) filter.type = params.type;
+  if (params.startDate || params.endDate) {
+    const dateFilter: Record<string, Date> = {};
+    if (params.startDate) dateFilter.$gte = new Date(params.startDate);
+    if (params.endDate) dateFilter.$lte = new Date(params.endDate);
+    filter.date = dateFilter;
+  }
 
   const pageNum = Math.max(1, parseInt(String(params.page || '1')));
-  const pageSize = Math.min(100, Math.max(1, parseInt(String(params.limit || '50'))));
+  const pageSize = Math.min(500, Math.max(1, parseInt(String(params.limit || '50'))));
   const skip = (pageNum - 1) * pageSize;
 
   const [transactions, total] = await Promise.all([

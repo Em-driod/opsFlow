@@ -3,8 +3,26 @@ import crypto from 'crypto';
 import Receipt from '../models/Receipt.js';
 import type { IReceiptItem } from '../models/Receipt.js';
 import Business from '../models/Business.js';
+import Product from '../models/Product.js';
 import { sendIssuedReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+
+// Reduces stock for any catalog items in the receipt. trackStock items are allowed
+// to go negative on purpose — the UI surfaces negative stock for the owner to correct
+// rather than blocking the sale outright.
+const applyStockForReceiptItems = async (businessId: mongoose.Types.ObjectId, items: IReceiptItem[]) => {
+  const decrements = items.filter((item) => item.productId && item.quantity);
+  if (decrements.length === 0) return;
+
+  await Promise.all(
+    decrements.map((item) =>
+      Product.updateOne(
+        { _id: item.productId, businessId, trackStock: true },
+        { $inc: { stock: -Number(item.quantity) } },
+      ),
+    ),
+  );
+};
 
 export const getReceiptsForBusiness = (businessId: mongoose.Types.ObjectId) =>
   Receipt.find({ businessId }).sort({ createdAt: -1 });
@@ -28,7 +46,7 @@ export const createReceiptForBusiness = async (businessId: mongoose.Types.Object
     // Collision odds are astronomically low, but retry once just in case.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        return await Receipt.create({
+        const receipt = await Receipt.create({
           ...body,
           items,
           transactionIds,
@@ -38,6 +56,8 @@ export const createReceiptForBusiness = async (businessId: mongoose.Types.Object
           receiptNumber: generateReceiptNumber(),
           publicToken,
         });
+        await applyStockForReceiptItems(businessId, items);
+        return receipt;
       } catch (e) {
         if ((e as { code?: number }).code === 11000 && attempt < 2) continue;
         throw e;
