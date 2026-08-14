@@ -11,6 +11,7 @@ export interface IProduct extends Document {
   isActive: boolean;
   trackStock: boolean;
   stock: number;
+  showOnProfile: boolean;
 }
 
 const ProductSchema: Schema = new Schema(
@@ -25,6 +26,7 @@ const ProductSchema: Schema = new Schema(
     isActive: { type: Boolean, default: true },
     trackStock: { type: Boolean, default: false },
     stock: { type: Number, default: 0 },
+    showOnProfile: { type: Boolean, default: true },
   },
   { timestamps: true },
 );

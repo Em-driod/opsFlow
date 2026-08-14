@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Business, { type IBusinessProfile } from '../models/Business.js';
 import User from '../models/User.js';
+import Product from '../models/Product.js';
 import { AppError } from '../utils/AppError.js';
 
 export const createBusinessForOwner = async (
@@ -109,11 +110,25 @@ export const updateBusinessProfile = async (
 export const getPublicProfileBySlug = async (slug: string) => {
   const business = await Business.findOne({ slug });
   if (!business || !business.profile?.isPublic) throw new AppError('Profile not found', 404);
+
+  // Catalog items are the source of truth — a business only has to enter a
+  // product once (in Catalog) for it to show up here, instead of re-typing it
+  // into the profile's manual "services" list too. Catalog items are shown
+  // first, with any hand-curated services (e.g. bundled packages) after.
+  const catalogItems = await Product.find({ businessId: business._id, isActive: true, showOnProfile: true })
+    .sort({ name: 1 })
+    .select('name description price image');
+
+  const services = [
+    ...catalogItems.map((p) => ({ name: p.name, description: p.description, price: p.price, image: p.image })),
+    ...(business.profile?.services ?? []),
+  ];
+
   return {
     name: business.name,
     slug: business.slug,
     currency: business.currency,
-    profile: business.profile,
+    profile: { ...business.profile, services },
   };
 };
 
