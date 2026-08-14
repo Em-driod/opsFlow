@@ -157,11 +157,12 @@ export const createInvoice = async (
 
 export const getInvoicesForBusiness = async (
   businessId: mongoose.Types.ObjectId,
-  params: { page?: string; limit?: string; status?: string; search?: string },
+  params: { page?: string; limit?: string; status?: string; search?: string; clientId?: string },
 ) => {
   const filter: Record<string, unknown> = { businessId };
   if (params.status) filter.status = params.status;
   if (params.search) filter.invoiceNumber = { $regex: String(params.search), $options: 'i' };
+  if (params.clientId) filter.clientId = params.clientId;
 
   const pageNum = Math.max(1, parseInt(String(params.page || '1')));
   const pageSize = Math.min(100, Math.max(1, parseInt(String(params.limit || '50'))));

@@ -32,12 +32,13 @@ export const createInvoice = asyncHandler(async (req: Request, res: Response) =>
  */
 export const getInvoices = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
-  const { page, limit, status, search } = req.query;
+  const { page, limit, status, search, clientId } = req.query;
   const result = await invoiceService.getInvoicesForBusiness(req.user.businessId, {
     page: page as string,
     limit: limit as string,
     status: status as string,
     search: search as string,
+    clientId: clientId as string,
   });
   res.status(200).json(result);
 });
