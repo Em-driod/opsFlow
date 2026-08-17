@@ -118,7 +118,9 @@ export const getPublicProfileBySlug = async (slug: string) => {
   // product once (in Catalog) for it to show up here, instead of re-typing it
   // into the profile's manual "services" list too. Catalog items are shown
   // first, with any hand-curated services (e.g. bundled packages) after.
-  const catalogItems = await Product.find({ businessId: business._id, isActive: true, showOnProfile: true })
+  // $ne: false (not "true") so products saved before this field existed — which have
+  // no showOnProfile in the document at all — still count as visible by default.
+  const catalogItems = await Product.find({ businessId: business._id, isActive: true, showOnProfile: { $ne: false } })
     .sort({ name: 1 })
     .select('name description price image trackStock stock');
 
