@@ -19,6 +19,7 @@ export interface IInvoice extends Document {
     quantity: number;
     unitPrice: number;
     total: number;
+    productId?: mongoose.Types.ObjectId;
   }[];
   subtotal: number;
   tax: number;
@@ -38,6 +39,7 @@ const LineItemSchema: Schema = new Schema({
   quantity: { type: Number, required: true, default: 1 },
   unitPrice: { type: Number, required: true },
   total: { type: Number, required: true },
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
 });
 
 const InvoicePaymentSchema: Schema = new Schema(

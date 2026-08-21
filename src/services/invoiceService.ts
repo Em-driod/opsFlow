@@ -5,6 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import Invoice, { type IInvoice } from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 import Business from '../models/Business.js';
+import Product from '../models/Product.js';
 import { createNotification } from '../services/notificationService.js';
 import { enqueue } from './exportQueueService.js';
 import { fire } from './webhookService.js';
@@ -181,6 +182,23 @@ export const getInvoiceByIdForBusiness = async (id: string, businessId: mongoose
   return invoice;
 };
 
+// Reduces stock for any catalog items on the invoice — only called once the invoice
+// is fully paid, not on partial payments, since the sale isn't settled until then.
+// Same "not explicitly false" opt-out and allow-negative behavior as receipts.
+const applyStockForInvoiceLineItems = async (businessId: mongoose.Types.ObjectId, invoice: IInvoice) => {
+  const decrements = invoice.lineItems.filter((item) => item.productId && item.quantity);
+  if (decrements.length === 0) return;
+
+  await Promise.all(
+    decrements.map((item) =>
+      Product.updateOne(
+        { _id: item.productId, businessId, trackStock: true },
+        { $inc: { stock: -item.quantity } },
+      ),
+    ),
+  );
+};
+
 // Records money actually received against an invoice — creates a transaction for
 // exactly that amount (not the invoice's face value), logs it in invoice.payments,
 // and moves status to 'partial' or 'paid' depending on what's left owing. This is
@@ -228,6 +246,19 @@ export const recordPaymentForInvoice = async (
   }
 
   const updatedInvoice = await invoice.save();
+
+  if (willFullyPay) {
+    await applyStockForInvoiceLineItems(user.businessId, updatedInvoice);
+  }
+
+  await createNotification({
+    businessId: user.businessId,
+    userId: user._id as mongoose.Types.ObjectId,
+    message: willFullyPay
+      ? `Invoice #${updatedInvoice.invoiceNumber} fully paid — ${amount} received.`
+      : `${amount} received on Invoice #${updatedInvoice.invoiceNumber} — ${updatedInvoice.balance} still owing.`,
+    link: `/invoices/${updatedInvoice._id}`,
+  });
 
   enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
   fire('invoice.updated', String(user.businessId), updatedInvoice.toObject());
@@ -438,6 +469,18 @@ export const handlePaystackWebhook = async (rawBody: unknown, signature: unknown
   }
 
   await invoice.save();
+  await applyStockForInvoiceLineItems(invoice.businessId, invoice);
+
+  const owningBusiness = await Business.findById(invoice.businessId).select('owner');
+  if (owningBusiness?.owner) {
+    await createNotification({
+      businessId: invoice.businessId,
+      userId: owningBusiness.owner,
+      message: `Invoice #${invoice.invoiceNumber} fully paid via Paystack — ${amountCharged} received.`,
+      link: `/invoices/${invoice._id}`,
+    });
+  }
+
   emitToBusiness(String(invoice.businessId), 'data_updated', { type: 'invoice', action: 'paid' });
 
   const populated = await Invoice.findById(invoiceId)
