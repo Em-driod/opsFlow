@@ -78,6 +78,17 @@ export const recordPayment = asyncHandler(async (req: Request, res: Response) =>
 });
 
 /**
+ * @desc    Undo the most recently recorded payment on an invoice
+ * @route   DELETE /api/invoices/:id/payments/last
+ * @access  Private
+ */
+export const undoLastPayment = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const updatedInvoice = await invoiceService.undoLastPaymentForInvoice(req.params.id!, req.user);
+  res.status(200).json(updatedInvoice);
+});
+
+/**
  * @desc    Get a single invoice publicly (no auth) — used for client-facing view
  * @route   GET /api/invoices/public/:id
  * @access  Public

@@ -100,14 +100,15 @@ export const createInvoice = async (
   params: {
     clientId?: string;
     customClientName?: string;
-    lineItems?: { description: string; quantity: number; unitPrice: number; total: number }[];
+    lineItems?: { description: string; quantity: number; unitPrice: number; total: number; productId?: string }[];
     tax?: number;
     dueDate?: string;
     notes?: string;
     recordAsIncome?: boolean;
+    depositAmount?: number;
   },
 ) => {
-  const { clientId, customClientName, lineItems = [], tax = 0, dueDate: rawDueDate, notes, recordAsIncome } = params;
+  const { clientId, customClientName, lineItems = [], tax = 0, dueDate: rawDueDate, notes, recordAsIncome, depositAmount } = params;
   const dueDate = rawDueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const subtotal = lineItems.reduce((acc, item) => acc + item.total, 0);
@@ -126,27 +127,33 @@ export const createInvoice = async (
     notes,
   });
 
-  if (recordAsIncome) {
-    const incomeTransaction = await Transaction.create({
-      clientId: clientId || null,
-      businessId: user.businessId,
-      amount: total,
-      type: 'income',
-      category: 'Sales',
-      description: `Payment for Invoice #${invoice.invoiceNumber}${customClientName ? ` (${customClientName})` : ''}`,
-      recordedBy: user._id,
-    });
-
-    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
-    invoice.status = 'paid';
+  // depositAmount is the modern path — an explicit amount paid at creation, which
+  // can be partial. recordAsIncome is the older "fully paid right now" shortcut,
+  // kept working by treating it as a deposit of the full total. Both flow through
+  // the same payment logic so the audit log, notification, and stock deduction
+  // stay consistent no matter how the invoice was born already-paid.
+  const initialPayment = depositAmount && depositAmount > 0 ? depositAmount : recordAsIncome ? total : 0;
+  let willFullyPay = false;
+  if (initialPayment > 0) {
+    ({ willFullyPay } = await applyPaymentToInvoice(invoice, user.businessId, user._id as mongoose.Types.ObjectId, {
+      amount: initialPayment,
+      method: 'manual',
+      note: 'Recorded at invoice creation',
+    }));
   }
 
   const createdInvoice = await invoice.save();
 
+  if (willFullyPay) {
+    await applyStockForInvoiceLineItems(user.businessId, createdInvoice);
+  }
+
   await createNotification({
     businessId: user.businessId,
     userId: user._id as mongoose.Types.ObjectId,
-    message: `New invoice #${createdInvoice.invoiceNumber} created for a total of ${total}.${recordAsIncome ? ' Recorded as income.' : ''}`,
+    message: `New invoice #${createdInvoice.invoiceNumber} created for a total of ${total}.${
+      willFullyPay ? ' Paid in full.' : initialPayment > 0 ? ` ${initialPayment} received as a deposit.` : ''
+    }`,
     link: `/invoices/${createdInvoice._id}`,
   });
 
@@ -182,21 +189,71 @@ export const getInvoiceByIdForBusiness = async (id: string, businessId: mongoose
   return invoice;
 };
 
-// Reduces stock for any catalog items on the invoice — only called once the invoice
-// is fully paid, not on partial payments, since the sale isn't settled until then.
-// Same "not explicitly false" opt-out and allow-negative behavior as receipts.
-const applyStockForInvoiceLineItems = async (businessId: mongoose.Types.ObjectId, invoice: IInvoice) => {
-  const decrements = invoice.lineItems.filter((item) => item.productId && item.quantity);
-  if (decrements.length === 0) return;
+// Reduces (or, on payment undo, restores) stock for any catalog items on the
+// invoice — only ever called once the invoice is fully paid / un-paid, not on
+// partial payments, since the sale isn't settled until then. Same "not
+// explicitly false" opt-out and allow-negative behavior as receipts.
+const applyStockForInvoiceLineItems = async (
+  businessId: mongoose.Types.ObjectId,
+  invoice: IInvoice,
+  direction: 1 | -1 = -1,
+) => {
+  const items = invoice.lineItems.filter((item) => item.productId && item.quantity);
+  if (items.length === 0) return;
 
   await Promise.all(
-    decrements.map((item) =>
+    items.map((item) =>
       Product.updateOne(
         { _id: item.productId, businessId, trackStock: true },
-        { $inc: { stock: -item.quantity } },
+        { $inc: { stock: direction * item.quantity } },
       ),
     ),
   );
+};
+
+// Mutates `invoice` in place: validates the amount, creates the income transaction,
+// logs it in payments[], and updates status. Does NOT save — the caller saves once
+// (so it composes cleanly with invoice creation, which has its own initial save)
+// and handles the post-save side effects (stock, notification) since those differ
+// slightly between "paying an existing invoice" and "invoice born already paid".
+const applyPaymentToInvoice = async (
+  invoice: IInvoice,
+  businessId: mongoose.Types.ObjectId,
+  recordedBy: mongoose.Types.ObjectId | undefined,
+  params: { amount: number; method?: string; note?: string },
+) => {
+  const amount = Number(params.amount);
+  if (!amount || amount <= 0) throw new AppError('Enter a valid payment amount', 400);
+  if (amount > invoice.balance + 0.01) {
+    throw new AppError(`Amount exceeds the remaining balance of ${invoice.balance.toFixed(2)}`, 400);
+  }
+
+  const willFullyPay = amount >= invoice.balance - 0.01;
+
+  const incomeTransaction = await Transaction.create({
+    clientId: invoice.clientId || null,
+    businessId,
+    amount,
+    type: 'income',
+    category: 'Sales',
+    description: `Payment received for Invoice #${invoice.invoiceNumber}${willFullyPay ? '' : ' (partial)'}`,
+    recordedBy,
+    source: 'manual',
+  });
+
+  invoice.payments.push({
+    amount,
+    date: new Date(),
+    method: params.method || 'manual',
+    transactionId: incomeTransaction._id as mongoose.Types.ObjectId,
+    ...(params.note ? { note: params.note } : {}),
+  });
+  invoice.status = willFullyPay ? 'paid' : 'partial';
+  if (willFullyPay && !invoice.transactionId) {
+    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
+  }
+
+  return { willFullyPay, transaction: incomeTransaction };
 };
 
 // Records money actually received against an invoice — creates a transaction for
@@ -215,35 +272,7 @@ export const recordPaymentForInvoice = async (
   if (invoice.status === 'paid') throw new AppError('Invoice is already fully paid', 400);
 
   const amount = Number(params.amount);
-  if (!amount || amount <= 0) throw new AppError('Enter a valid payment amount', 400);
-  if (amount > invoice.balance + 0.01) {
-    throw new AppError(`Amount exceeds the remaining balance of ${invoice.balance.toFixed(2)}`, 400);
-  }
-
-  const willFullyPay = amount >= invoice.balance - 0.01;
-
-  const incomeTransaction = await Transaction.create({
-    clientId: invoice.clientId || null,
-    businessId: invoice.businessId,
-    amount,
-    type: 'income',
-    category: 'Sales',
-    description: `Payment received for Invoice #${invoice.invoiceNumber}${willFullyPay ? '' : ' (partial)'}`,
-    recordedBy: user._id,
-    source: 'manual',
-  });
-
-  invoice.payments.push({
-    amount,
-    date: new Date(),
-    method: params.method || 'manual',
-    transactionId: incomeTransaction._id as mongoose.Types.ObjectId,
-    ...(params.note ? { note: params.note } : {}),
-  });
-  invoice.status = willFullyPay ? 'paid' : 'partial';
-  if (willFullyPay && !invoice.transactionId) {
-    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
-  }
+  const { willFullyPay } = await applyPaymentToInvoice(invoice, user.businessId, user._id as mongoose.Types.ObjectId, params);
 
   const updatedInvoice = await invoice.save();
 
@@ -257,6 +286,49 @@ export const recordPaymentForInvoice = async (
     message: willFullyPay
       ? `Invoice #${updatedInvoice.invoiceNumber} fully paid — ${amount} received.`
       : `${amount} received on Invoice #${updatedInvoice.invoiceNumber} — ${updatedInvoice.balance} still owing.`,
+    link: `/invoices/${updatedInvoice._id}`,
+  });
+
+  enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
+  fire('invoice.updated', String(user.businessId), updatedInvoice.toObject());
+  emitToBusiness(String(user.businessId), 'data_updated', { type: 'invoice', action: 'updated' });
+
+  return updatedInvoice;
+};
+
+// Removes the most recently recorded payment — deletes its linked transaction,
+// restores stock if that payment was the one that completed full payment, and
+// drops status back to 'partial' (if other payments remain) or 'sent' (if not).
+// Only the last payment can be undone, not arbitrary history, to avoid the mess
+// of recalculating everything after a payment buried earlier in the log.
+export const undoLastPaymentForInvoice = async (id: string, user: IUser) => {
+  const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
+  if (!invoice) throw new AppError('Invoice not found', 404);
+  if (invoice.payments.length === 0) throw new AppError('This invoice has no recorded payments to undo', 400);
+
+  const wasFullyPaid = invoice.status === 'paid';
+  const lastPayment = invoice.payments[invoice.payments.length - 1]!;
+  invoice.payments.pop();
+
+  if (lastPayment.transactionId) {
+    await Transaction.findByIdAndDelete(lastPayment.transactionId);
+    if (invoice.transactionId && String(invoice.transactionId) === String(lastPayment.transactionId)) {
+      invoice.transactionId = undefined;
+    }
+  }
+
+  invoice.status = invoice.payments.length > 0 ? 'partial' : 'sent';
+
+  const updatedInvoice = await invoice.save();
+
+  if (wasFullyPaid) {
+    await applyStockForInvoiceLineItems(user.businessId, updatedInvoice, 1);
+  }
+
+  await createNotification({
+    businessId: user.businessId,
+    userId: user._id as mongoose.Types.ObjectId,
+    message: `Removed a payment of ${lastPayment.amount} from Invoice #${updatedInvoice.invoiceNumber}.`,
     link: `/invoices/${updatedInvoice._id}`,
   });
 

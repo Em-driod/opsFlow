@@ -27,7 +27,7 @@ export interface IInvoice extends Document {
   status: 'draft' | 'sent' | 'partial' | 'paid' | 'overdue';
   dueDate: Date;
   notes?: string;
-  transactionId?: mongoose.Types.ObjectId;
+  transactionId?: mongoose.Types.ObjectId | undefined;
   payments: IInvoicePayment[];
   // Virtuals (computed, not stored)
   amountPaid: number;

@@ -5,6 +5,7 @@ import {
   getInvoiceById,
   updateInvoiceStatus,
   recordPayment,
+  undoLastPayment,
   scanInvoice,
   getPublicInvoice,
   sendInvoice,
@@ -28,6 +29,7 @@ router.post('/scan', protect, upload.single('image'), scanInvoice);
 router.route('/:id').get(protect, getInvoiceById);
 router.route('/:id/status').put(protect, updateInvoiceStatus);
 router.post('/:id/payments', protect, recordPayment);
+router.delete('/:id/payments/last', protect, undoLastPayment);
 router.post('/:id/send', protect, sendInvoice);
 router.post('/:id/whatsapp', protect, getWhatsAppLink);
 
