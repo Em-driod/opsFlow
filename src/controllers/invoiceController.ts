@@ -66,6 +66,18 @@ export const updateInvoiceStatus = asyncHandler(async (req: Request, res: Respon
 });
 
 /**
+ * @desc    Record a payment (full or partial) against an invoice
+ * @route   POST /api/invoices/:id/payments
+ * @access  Private
+ */
+export const recordPayment = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const { amount, method, note } = req.body;
+  const updatedInvoice = await invoiceService.recordPaymentForInvoice(req.params.id!, req.user, { amount, method, note });
+  res.status(200).json(updatedInvoice);
+});
+
+/**
  * @desc    Get a single invoice publicly (no auth) — used for client-facing view
  * @route   GET /api/invoices/public/:id
  * @access  Public

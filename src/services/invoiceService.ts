@@ -181,32 +181,81 @@ export const getInvoiceByIdForBusiness = async (id: string, businessId: mongoose
   return invoice;
 };
 
+// Records money actually received against an invoice — creates a transaction for
+// exactly that amount (not the invoice's face value), logs it in invoice.payments,
+// and moves status to 'partial' or 'paid' depending on what's left owing. This is
+// the one place that touches the invoice/transaction/payments trio, so every
+// payment channel (manual entry, the old "mark as paid" toggle, Paystack) goes
+// through it and the ledger always sums to what actually came in.
+export const recordPaymentForInvoice = async (
+  id: string,
+  user: IUser,
+  params: { amount: number; method?: string; note?: string },
+) => {
+  const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
+  if (!invoice) throw new AppError('Invoice not found', 404);
+  if (invoice.status === 'paid') throw new AppError('Invoice is already fully paid', 400);
+
+  const amount = Number(params.amount);
+  if (!amount || amount <= 0) throw new AppError('Enter a valid payment amount', 400);
+  if (amount > invoice.balance + 0.01) {
+    throw new AppError(`Amount exceeds the remaining balance of ${invoice.balance.toFixed(2)}`, 400);
+  }
+
+  const willFullyPay = amount >= invoice.balance - 0.01;
+
+  const incomeTransaction = await Transaction.create({
+    clientId: invoice.clientId || null,
+    businessId: invoice.businessId,
+    amount,
+    type: 'income',
+    category: 'Sales',
+    description: `Payment received for Invoice #${invoice.invoiceNumber}${willFullyPay ? '' : ' (partial)'}`,
+    recordedBy: user._id,
+    source: 'manual',
+  });
+
+  invoice.payments.push({
+    amount,
+    date: new Date(),
+    method: params.method || 'manual',
+    transactionId: incomeTransaction._id as mongoose.Types.ObjectId,
+    ...(params.note ? { note: params.note } : {}),
+  });
+  invoice.status = willFullyPay ? 'paid' : 'partial';
+  if (willFullyPay && !invoice.transactionId) {
+    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
+  }
+
+  const updatedInvoice = await invoice.save();
+
+  enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
+  fire('invoice.updated', String(user.businessId), updatedInvoice.toObject());
+  emitToBusiness(String(user.businessId), 'data_updated', { type: 'invoice', action: 'updated' });
+
+  return updatedInvoice;
+};
+
 export const updateInvoiceStatusForBusiness = async (
   id: string,
   user: IUser,
   status: IInvoice['status'],
 ) => {
+  if (status === 'partial') {
+    throw new AppError('Invoices move to "partial" automatically once a payment is recorded against them — use the payments endpoint instead.', 400);
+  }
+
+  if (status === 'paid') {
+    const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
+    if (!invoice) throw new AppError('Invoice not found', 404);
+    if (invoice.balance <= 0) return invoice;
+    return recordPaymentForInvoice(id, user, { amount: invoice.balance, method: 'manual' });
+  }
+
   const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
   if (!invoice) throw new AppError('Invoice not found', 404);
 
   invoice.status = status;
-
-  // Create an income transaction the first time an invoice transitions to paid.
-  // Guard: skip if a transaction was already created at invoice-creation time.
-  if (status === 'paid' && !invoice.transactionId) {
-    const incomeTransaction = await Transaction.create({
-      clientId: invoice.clientId || null,
-      businessId: invoice.businessId,
-      amount: invoice.total,
-      type: 'income',
-      category: 'Sales',
-      description: `Payment received for Invoice #${invoice.invoiceNumber}`,
-      recordedBy: user._id,
-      source: 'manual',
-    });
-    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
-  }
-
   const updatedInvoice = await invoice.save();
 
   enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
@@ -320,7 +369,10 @@ export const initPaystackPaymentForInvoice = async (id: string, email: string) =
   const paystackKey = process.env.PAYSTACK_SECRET_KEY;
   if (!paystackKey) throw new AppError('Payment not configured on this server', 503);
 
-  const amountKobo = Math.round(invoice.total * 100);
+  // Charge whatever's actually left owing, not the invoice's face value — matters
+  // once part of it has already been paid manually (e.g. a bank transfer logged
+  // against the invoice before the client pays the rest online).
+  const amountKobo = Math.round(invoice.balance * 100);
 
   try {
     const response = await axios.post(
@@ -363,19 +415,26 @@ export const handlePaystackWebhook = async (rawBody: unknown, signature: unknown
   const invoice = await Invoice.findById(invoiceId);
   if (!invoice || invoice.status === 'paid') return;
 
+  const amountCharged = invoice.balance;
   invoice.status = 'paid';
 
   if (!invoice.transactionId) {
     const tx = await Transaction.create({
       clientId: invoice.clientId || null,
       businessId: invoice.businessId,
-      amount: invoice.total,
+      amount: amountCharged,
       type: 'income',
       category: 'Sales',
       description: `Paystack payment for Invoice #${invoice.invoiceNumber}`,
       source: 'manual',
     });
     invoice.transactionId = tx._id as mongoose.Types.ObjectId;
+    invoice.payments.push({
+      amount: amountCharged,
+      date: new Date(),
+      method: 'paystack',
+      transactionId: tx._id as mongoose.Types.ObjectId,
+    });
   }
 
   await invoice.save();
