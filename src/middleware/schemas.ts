@@ -12,6 +12,21 @@ export const registerSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters.').trim(),
 });
 
+export const staffUserSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters.').trim(),
+  email: z.string().email('Enter a valid email address.').toLowerCase().trim(),
+  password: z.string().min(8, 'Password must be at least 8 characters.'),
+  role: z.enum(['admin', 'staff']).optional(),
+  businessId: z.string().optional(),
+});
+
+export const updateUserSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters.').trim().optional(),
+  email: z.string().email('Enter a valid email address.').toLowerCase().trim().optional(),
+  password: z.string().min(8, 'Password must be at least 8 characters.').optional().or(z.literal('')),
+  role: z.enum(['admin', 'staff']).optional(),
+});
+
 export const googleAuthSchema = z.object({
   idToken: z.string().min(1, 'Google ID token is required.'),
 });

@@ -12,6 +12,7 @@ import {
   declineProposal,
 } from '../controllers/proposalController.js';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 
 // Public routes — no auth
 router.get('/public/:id', getPublicProposal);
@@ -20,7 +21,7 @@ router.post('/public/:id/decline', declineProposal);
 
 // Protected routes
 router.route('/').get(protect, getProposals).post(protect, createProposal);
-router.route('/:id').put(protect, updateProposal).delete(protect, deleteProposal);
+router.route('/:id').put(protect, updateProposal).delete(protect, permit('admin'), deleteProposal);
 router.post('/:id/send', protect, sendProposal);
 router.post('/:id/convert', protect, convertToInvoice);
 

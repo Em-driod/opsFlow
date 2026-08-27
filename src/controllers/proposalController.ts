@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
+import { audit } from '../utils/activityLogger.js';
 import * as proposalService from '../services/proposalService.js';
 
 // GET /api/proposals
@@ -19,6 +20,13 @@ export const getProposals = asyncHandler(async (req: Request, res: Response) => 
 export const createProposal = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const proposal = await proposalService.createProposalForBusiness(req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'CREATE',
+    resource: 'PROPOSAL',
+    resourceId: String(proposal._id),
+    details: { proposalNumber: proposal.proposalNumber, title: proposal.title, total: proposal.total },
+  });
   res.status(201).json(proposal);
 });
 
@@ -33,6 +41,7 @@ export const updateProposal = asyncHandler(async (req: Request, res: Response) =
 export const deleteProposal = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   await proposalService.deleteProposalForBusiness(req.params.id!, req.user.businessId);
+  audit({ req, action: 'DELETE', resource: 'PROPOSAL', resourceId: req.params.id });
   res.json({ message: 'Proposal deleted' });
 });
 
@@ -40,6 +49,7 @@ export const deleteProposal = asyncHandler(async (req: Request, res: Response) =
 export const sendProposal = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const result = await proposalService.sendProposalForBusiness(req.params.id!, req.user.businessId);
+  audit({ req, action: 'SEND', resource: 'PROPOSAL', resourceId: req.params.id });
   res.json(result);
 });
 

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
+import { audit } from '../utils/activityLogger.js';
 import * as receiptService from '../services/receiptService.js';
 
 // GET /api/receipts
@@ -14,6 +15,16 @@ export const getReceipts = asyncHandler(async (req: Request, res: Response) => {
 export const createReceipt = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const receipt = await receiptService.createReceiptForBusiness(req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'CREATE',
+    resource: 'RECEIPT',
+    resourceId: String((receipt as { _id: unknown })._id),
+    details: {
+      receiptNumber: (receipt as { receiptNumber?: string }).receiptNumber,
+      amount: (receipt as { amount?: number }).amount,
+    },
+  });
   res.status(201).json(receipt);
 });
 
@@ -21,6 +32,7 @@ export const createReceipt = asyncHandler(async (req: Request, res: Response) =>
 export const deleteReceipt = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   await receiptService.deleteReceiptForBusiness(req.params.id!, req.user.businessId);
+  audit({ req, action: 'DELETE', resource: 'RECEIPT', resourceId: req.params.id });
   res.json({ message: 'Deleted' });
 });
 

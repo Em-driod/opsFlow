@@ -10,6 +10,7 @@ import {
   getClientPortal,
 } from '../controllers/clientController.js';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 import { validate } from '../middleware/validate.js';
 import { createClientSchema } from '../middleware/schemas.js';
 
@@ -21,7 +22,7 @@ router
   .route('/:id')
   .get(protect, getClientById)
   .put(protect, updateClient)
-  .delete(protect, deleteClient);
+  .delete(protect, permit('admin'), deleteClient);
 
 router.post('/:id/portal', protect, generatePortalLink);
 

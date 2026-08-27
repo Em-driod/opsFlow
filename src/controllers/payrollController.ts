@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
+import { audit } from '../utils/activityLogger.js';
 import * as payrollService from '../services/payrollService.js';
 
 /**
@@ -10,6 +11,16 @@ import * as payrollService from '../services/payrollService.js';
 export const createPayroll = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const payroll = await payrollService.createPayrollForBusiness(req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'CREATE',
+    resource: 'PAYROLL',
+    resourceId: String((payroll as { _id: unknown })._id),
+    details: {
+      name: (payroll as { manualName?: string; name?: string }).manualName ?? (payroll as { name?: string }).name,
+      salary: (payroll as { salary?: number }).salary,
+    },
+  });
   res.status(201).json(payroll);
 });
 
@@ -50,6 +61,7 @@ export const updatePayroll = asyncHandler(async (req: Request, res: Response) =>
 export const deletePayroll = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   await payrollService.deletePayrollForBusiness(req.params.id!, req.user.businessId);
+  audit({ req, action: 'DELETE', resource: 'PAYROLL', resourceId: req.params.id });
   res.json({ message: 'Payroll entry deleted successfully' });
 });
 
@@ -60,6 +72,14 @@ export const deletePayroll = asyncHandler(async (req: Request, res: Response) =>
 export const processPayrolls = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const result = await payrollService.processPendingPayrollsForBusiness(req.user);
+  audit({
+    req,
+    action: 'PAYMENT',
+    resource: 'PAYROLL',
+    summary: 'Processed pending payroll',
+    severity: 'sensitive',
+    details: result as Record<string, unknown>,
+  });
   res.json(result);
 });
 

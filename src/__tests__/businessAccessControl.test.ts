@@ -90,6 +90,23 @@ describe('cross-business access control on /api/businesses (regression for IDOR 
     expect(res.status).toBe(404);
   });
 
+  it('blocks pulling another business’s user into your own (account hijack)', async () => {
+    const a = await makeBusinessWithAdmin('A');
+    const b = await makeBusinessWithAdmin('B');
+    const token = signToken(a.admin._id);
+
+    // :id is the attacker's OWN business, so assertOwnBusiness passes — the
+    // protection must come from scoping the target user to that business.
+    const res = await request(app)
+      .post(`/api/businesses/${a.business._id}/users`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ userId: String(b.admin._id) });
+
+    expect(res.status).toBe(404);
+    const victim = await User.findById(b.admin._id);
+    expect(String(victim?.businessId)).toBe(String(b.business._id));
+  });
+
   it('allows an admin to GET/PUT their own business', async () => {
     const a = await makeBusinessWithAdmin('A');
     const token = signToken(a.admin._id);

@@ -11,6 +11,7 @@ import {
 } from '../controllers/transactionController.js';
 import { previewCsv, commitCsv } from '../controllers/csvImportController.js';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 import { validate } from '../middleware/validate.js';
 import { createTransactionSchema } from '../middleware/schemas.js';
 import upload from '../middleware/multer.js';
@@ -24,6 +25,6 @@ router
   .route('/:id')
   .get(protect, getTransactionById)
   .put(protect, updateTransaction)
-  .delete(protect, deleteTransaction);
+  .delete(protect, permit('admin'), deleteTransaction);
 
 export default router;

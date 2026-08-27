@@ -8,6 +8,7 @@ import {
   commitAllScannedItems,
 } from '../controllers/scannedTransactionController.js';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ router.route('/:id/parsed-items/:itemIndex')
     .put(protect, updateParsedScanItem);
 
 router.route('/:id')
-    .delete(protect, deleteScannedTransaction);
+    .delete(protect, permit('admin'), deleteScannedTransaction);
 
 router.route('/:id/commit')
     .post(protect, commitScannedTransaction);

@@ -141,7 +141,7 @@ Here is the sanitised JSON context: ${contextDump}
 
 Your job is to determine the user's intent from their command and respond strictly in JSON.
 
-If the user wants to LOG a transaction (e.g., "I spent $50 on Uber", "Got paid $1000"):
+If the user wants to LOG a transaction (e.g., "I spent 50 on Uber", "Got paid 1000"):
 {
   "intent": "LOG_TRANSACTION",
   "data": {

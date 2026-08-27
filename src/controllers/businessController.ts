@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import type mongoose from 'mongoose';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
+import { audit } from '../utils/activityLogger.js';
 import * as businessService from '../services/businessService.js';
 
 // @desc    Create a new business
@@ -28,6 +29,17 @@ export const getBusinessById = asyncHandler(async (req: Request, res: Response) 
 export const updateBusiness = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const updatedBusiness = await businessService.updateBusiness(req.params.id!, req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'BUSINESS',
+    resourceId: req.params.id,
+    summary: 'Updated business settings',
+    details: {
+      name: (req.body as { name?: string }).name,
+      currency: (req.body as { currency?: string }).currency,
+    },
+  });
   res.json(updatedBusiness);
 });
 
@@ -46,6 +58,14 @@ export const deleteBusiness = asyncHandler(async (req: Request, res: Response) =
 export const updateBusinessProfile = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const business = await businessService.updateBusinessProfile(req.params.id!, req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'BUSINESS',
+    resourceId: req.params.id,
+    summary: 'Updated public profile / storefront',
+    details: { fields: Object.keys(req.body || {}) },
+  });
   res.json(business);
 });
 
@@ -63,5 +83,13 @@ export const getPublicProfile = asyncHandler(async (req: Request, res: Response)
 export const addUserToBusiness = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   await businessService.addUserToBusiness(req.params.id!, req.user.businessId, req.body.userId);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'USER',
+    resourceId: req.body.userId,
+    summary: 'Linked a user to the business',
+    severity: 'sensitive',
+  });
   res.json({ message: 'User added to business' });
 });

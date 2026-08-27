@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
+import Business from '../models/Business.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { analyzeCashFlow } from './cashFlowService.js';
 import { checkAiRateLimit } from './aiRateLimiter.js';
+import { formatCurrency, getCurrencySymbol } from '../utils/currency.js';
 
 interface Scenario {
   title: string;
@@ -28,6 +30,13 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
   const overdueInvoices = await Invoice.find({ businessId, status: 'overdue' });
   const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
 
+  // Resolve the business's own currency so every figure we surface (and every
+  // figure we hand to Gemini) is in the currency the owner actually operates in.
+  const business = await Business.findById(businessId).select('currency').lean();
+  const currency = business?.currency || 'NGN';
+  const currencySymbol = getCurrencySymbol(currency);
+  const money = (amount: number) => formatCurrency(amount, currency);
+
   // 3. Generate scenarios. We skip Gemini entirely when data confidence is low —
   //    a generated narrative on top of 5 transactions is fiction, and fiction
   //    erodes the same trust the advisor is supposed to build. Instead we emit
@@ -46,7 +55,7 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
     if (overdueInvoices.length > 0) {
       aiScenarios.push({
         title: 'Collect overdue invoices',
-        impact: `+$${Math.round(overdueAmount)}`,
+        impact: `+${money(overdueAmount)}`,
         action: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? '' : 's'} past due — chase them today.`,
       });
     }
@@ -62,7 +71,7 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
         aiScenarios = [
           {
             title: 'Collect overdue invoices',
-            impact: `+$${Math.round(overdueAmount)}`,
+            impact: `+${money(overdueAmount)}`,
             action: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? '' : 's'} past due — chase them today.`,
           },
         ];
@@ -75,12 +84,14 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
             "You are an elite, highly intelligent financial CFO Assistant. Output MUST be valid JSON, containing an array of 'scenarios'.",
         });
         const prompt = `
+          All monetary amounts are in ${currency}. Use the "${currencySymbol.trim()}" symbol (or the ${currency} code) for every figure you output — never assume US dollars.
+
           Current status:
           - Cash Runway: ${metrics.cashRunwayMonths} months
-          - Monthly Burn: $${metrics.monthlyBurnRate}
+          - Monthly Burn: ${money(metrics.monthlyBurnRate)}
           - Profit Margin: ${metrics.netMargin}%
-          - Unpaid Receivables: $${overdueAmount}
-          - Projected Revenue (Next 30d): $${metrics.projectedRevenueNext30d}
+          - Unpaid Receivables: ${money(overdueAmount)}
+          - Projected Revenue (Next 30d): ${money(metrics.projectedRevenueNext30d)}
           - Business Score: ${metrics.healthScore}/100
 
           Generate exactly 2 high-impact actionable 'Scenarios' for the business owner.
@@ -95,7 +106,7 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
             "scenarios": [
               {
                 "title": "Short descriptive title",
-                "impact": "+$X or +Y months",
+                "impact": "+${currencySymbol.trim()}X or +Y months",
                 "action": "One actionable sentence focusing on the revenue model."
               }
             ]

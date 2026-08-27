@@ -6,6 +6,7 @@ import {
   deleteRecurringInvoice,
 } from '../controllers/recurringInvoiceController.js';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 
 const router = express.Router();
 
@@ -15,6 +16,6 @@ router.route('/')
 
 router.route('/:id')
   .put(protect, updateRecurringInvoice)
-  .delete(protect, deleteRecurringInvoice);
+  .delete(protect, permit('admin'), deleteRecurringInvoice);
 
 export default router;

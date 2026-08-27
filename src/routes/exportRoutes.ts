@@ -1,6 +1,7 @@
 // src/routes/exportRoutes.ts
 import express from 'express';
 import { protect } from '../middleware/auth.js';
+import { permit } from '../middleware/permit.js';
 import {
   googleAuthRedirect,
   googleAuthCallback,
@@ -21,26 +22,27 @@ const router = express.Router();
 router.get('/google/auth', googleAuthRedirect);
 router.get('/google/callback', googleAuthCallback);
 
-// All other routes are protected
+// All other routes are protected. Connecting/pushing business data to external
+// destinations (Google Sheets, webhooks) is an admin action; staff may read status.
 router.use(protect);
 
-// Sheet connection
-router.post('/disconnect', disconnectSheet);
-
-// Status & control
+// Status & control (read)
 router.get('/status', getExportStatus);
-router.post('/toggle-sync', toggleAutoSync);
+router.get('/webhooks', listWebhooks);
+
+// Sheet connection
+router.post('/disconnect', permit('admin'), disconnectSheet);
+router.post('/toggle-sync', permit('admin'), toggleAutoSync);
 
 // Historical bulk sync
-router.post('/sync-all', syncAllData);
+router.post('/sync-all', permit('admin'), syncAllData);
 
 // Summary tab
-router.post('/summary', writeDailySummary);
+router.post('/summary', permit('admin'), writeDailySummary);
 
-// Webhooks
-router.get('/webhooks', listWebhooks);
-router.post('/webhooks', registerWebhook);
-router.delete('/webhooks/:id', deleteWebhook);
-router.post('/webhooks/:id/test', testWebhook);
+// Webhooks (write)
+router.post('/webhooks', permit('admin'), registerWebhook);
+router.delete('/webhooks/:id', permit('admin'), deleteWebhook);
+router.post('/webhooks/:id/test', permit('admin'), testWebhook);
 
 export default router;

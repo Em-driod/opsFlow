@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
+import { audit } from '../utils/activityLogger.js';
 import * as invoiceService from '../services/invoiceService.js';
 
 /**
@@ -22,6 +23,17 @@ export const scanInvoice = asyncHandler(async (req: Request, res: Response) => {
 export const createInvoice = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const createdInvoice = await invoiceService.createInvoice(req.user, req.body);
+  audit({
+    req,
+    action: 'CREATE',
+    resource: 'INVOICE',
+    resourceId: String(createdInvoice._id),
+    details: {
+      invoiceNumber: createdInvoice.invoiceNumber,
+      total: createdInvoice.total,
+      status: createdInvoice.status,
+    },
+  });
   res.status(201).json(createdInvoice);
 });
 
@@ -62,6 +74,14 @@ export const getInvoiceById = asyncHandler(async (req: Request, res: Response) =
 export const updateInvoiceStatus = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const updatedInvoice = await invoiceService.updateInvoiceStatusForBusiness(req.params.id!, req.user, req.body.status);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'INVOICE',
+    resourceId: String(updatedInvoice._id),
+    summary: `Set invoice ${updatedInvoice.invoiceNumber} to “${updatedInvoice.status}”`,
+    details: { invoiceNumber: updatedInvoice.invoiceNumber, status: updatedInvoice.status },
+  });
   res.status(200).json(updatedInvoice);
 });
 
@@ -74,6 +94,20 @@ export const recordPayment = asyncHandler(async (req: Request, res: Response) =>
   if (!req.user) throw new AppError('Not authorized', 401);
   const { amount, method, note } = req.body;
   const updatedInvoice = await invoiceService.recordPaymentForInvoice(req.params.id!, req.user, { amount, method, note });
+  audit({
+    req,
+    action: 'PAYMENT',
+    resource: 'INVOICE',
+    resourceId: String(updatedInvoice._id),
+    summary: `Recorded payment of ${amount} on invoice ${updatedInvoice.invoiceNumber}`,
+    details: {
+      invoiceNumber: updatedInvoice.invoiceNumber,
+      amount,
+      method,
+      status: updatedInvoice.status,
+      balance: (updatedInvoice as { balance?: number }).balance,
+    },
+  });
   res.status(200).json(updatedInvoice);
 });
 
@@ -85,6 +119,15 @@ export const recordPayment = asyncHandler(async (req: Request, res: Response) =>
 export const undoLastPayment = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const updatedInvoice = await invoiceService.undoLastPaymentForInvoice(req.params.id!, req.user);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'INVOICE',
+    resourceId: String(updatedInvoice._id),
+    summary: `Reversed last payment on invoice ${updatedInvoice.invoiceNumber}`,
+    severity: 'sensitive',
+    details: { invoiceNumber: updatedInvoice.invoiceNumber, status: updatedInvoice.status },
+  });
   res.status(200).json(updatedInvoice);
 });
 
@@ -109,6 +152,15 @@ export const sendInvoice = asyncHandler(async (req: Request, res: Response) => {
   if (!email) throw new AppError('Recipient email is required', 400);
 
   const { sent, publicLink } = await invoiceService.sendInvoiceByEmail(req.params.id!, req.user, email);
+
+  audit({
+    req,
+    action: 'SEND',
+    resource: 'INVOICE',
+    resourceId: req.params.id,
+    summary: `Emailed invoice to ${email}`,
+    details: { email, delivered: sent },
+  });
 
   res.status(200).json({
     message: sent

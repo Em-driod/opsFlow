@@ -146,15 +146,27 @@ export const getPublicProfileBySlug = async (slug: string) => {
 export const addUserToBusiness = async (businessId: string, requesterBusinessId: mongoose.Types.ObjectId, userId: string) => {
   assertOwnBusiness(requesterBusinessId, businessId);
   const business = await Business.findById(businessId);
-  const user = await User.findById(userId);
-  if (!business || !user) throw new AppError('Business or User not found', 404);
+  if (!business) throw new AppError('Business not found', 404);
 
-  if (business.users.map((id) => id.toString()).includes(userId)) {
-    throw new AppError('User already in business', 400);
+  // Only a user who already belongs to this business (repairing a missing
+  // Business.users link) or who has no business at all may be attached here.
+  // Without this scope an admin could pull another tenant's user into their org
+  // by passing that user's id, hijacking the account.
+  const user = await User.findOne({
+    _id: userId,
+    $or: [
+      { businessId: business._id },
+      { businessId: { $exists: false } },
+      { businessId: null },
+    ],
+  });
+  if (!user) throw new AppError('User not found', 404);
+
+  const alreadyLinked = business.users.some((id) => id.toString() === userId);
+  if (!alreadyLinked) {
+    business.users.push(user._id as mongoose.Types.ObjectId);
+    await business.save();
   }
-
-  business.users.push(user._id as mongoose.Types.ObjectId);
-  await business.save();
 
   user.businessId = business._id as mongoose.Types.ObjectId;
   await user.save();

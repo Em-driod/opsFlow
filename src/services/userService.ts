@@ -10,6 +10,12 @@ import { AppError } from '../utils/AppError.js';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_LOGIN_CLIENT_ID);
 
+const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Case-insensitive exact-match lookup so "Foo@x.com" and "foo@x.com" collide. */
+const findUserByEmail = (email: string) =>
+  User.findOne({ email: new RegExp(`^${escapeRegex(email.toLowerCase().trim())}$`, 'i') });
+
 export const generateToken = (id: mongoose.Types.ObjectId) =>
   jwt.sign({ id }, process.env.JWT_SECRET!, { expiresIn: '30d' });
 
@@ -32,9 +38,10 @@ export const registerUser = async (params: {
   password: string;
   businessName: string;
 }) => {
-  const { name, email, password, businessName } = params;
+  const { name, password, businessName } = params;
+  const email = params.email?.toLowerCase().trim();
 
-  const userExists = await User.findOne({ email });
+  const userExists = await findUserByEmail(email);
   if (userExists) throw new AppError('User with that email already exists', 400);
   if (!businessName) throw new AppError('Business name is required', 400);
 
@@ -50,6 +57,7 @@ export const registerUser = async (params: {
     businessId: newBusiness._id,
   });
   newBusiness.owner = newUser._id;
+  newBusiness.users = [newUser._id as mongoose.Types.ObjectId];
 
   await newBusiness.save();
   await newUser.save();
@@ -66,7 +74,7 @@ export const registerUser = async (params: {
 };
 
 export const loginUser = async (email: string, password: string) => {
-  const user = await User.findOne({ email });
+  const user = await findUserByEmail(email);
   if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
     throw new AppError('Invalid email or password', 401);
   }
@@ -75,20 +83,26 @@ export const loginUser = async (email: string, password: string) => {
 
 export const createStaffUser = async (
   requester: IUser,
-  params: { name: string; email: string; password: string; role?: string; businessId: string },
+  params: { name: string; email: string; password: string; role?: string; businessId?: string },
 ) => {
-  const { name, email, password, role, businessId } = params;
+  const { name, role, businessId } = params;
+  const email = params.email?.toLowerCase().trim();
+  const password = params.password;
 
   if (!requester.businessId || requester.role !== 'admin') {
     throw new AppError('Not authorized - admin access required', 401);
   }
-  if (requester.businessId.toString() !== businessId) {
+  // The client may still send its own businessId; if it does, it must be the
+  // requester's. We never trust it as the target — that's always requester.businessId.
+  if (businessId && requester.businessId.toString() !== businessId) {
     throw new AppError('Not authorized to create users for this business', 401);
   }
 
-  const userExists = await User.findOne({ email });
+  if (!password || password.length < 8) {
+    throw new AppError('Password must be at least 8 characters.', 400);
+  }
+  const userExists = await findUserByEmail(email);
   if (userExists) throw new AppError('User with that email already exists', 400);
-  if (!password) throw new AppError('Password is required', 400);
 
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);
@@ -97,11 +111,13 @@ export const createStaffUser = async (
     name,
     email,
     password: hashedPassword,
-    role: role || 'staff',
+    role: role === 'admin' ? 'admin' : 'staff',
     businessId: requester.businessId,
   });
 
-  return newUser.save();
+  await newUser.save();
+  await Business.findByIdAndUpdate(requester.businessId, { $addToSet: { users: newUser._id } });
+  return newUser;
 };
 
 export const getUsersForBusiness = (businessId: mongoose.Types.ObjectId) =>
@@ -126,12 +142,32 @@ export const updateUserForBusiness = async (
   const user = await User.findOne({ _id: targetId, businessId: requester.businessId });
   if (!user) throw new AppError('User not found', 404);
 
+  if (updates.email) {
+    const nextEmail = updates.email.toLowerCase().trim();
+    if (nextEmail !== user.email.toLowerCase()) {
+      const clash = await findUserByEmail(nextEmail);
+      if (clash && (clash._id as mongoose.Types.ObjectId).toString() !== targetId) {
+        throw new AppError('Another account already uses that email.', 400);
+      }
+      user.email = nextEmail;
+    }
+  }
+
   user.name = updates.name || user.name;
-  user.email = updates.email || user.email;
+
   if (updates.role && requester.role === 'admin' && !isSelf) {
+    // Never let the business end up with zero admins.
+    if (user.role === 'admin' && updates.role === 'staff') {
+      const adminCount = await User.countDocuments({ businessId: requester.businessId, role: 'admin' });
+      if (adminCount <= 1) throw new AppError('A business must keep at least one admin.', 400);
+    }
     user.role = updates.role as 'admin' | 'staff';
   }
+
   if (updates.password) {
+    if (updates.password.length < 8) {
+      throw new AppError('Password must be at least 8 characters.', 400);
+    }
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(updates.password, salt);
   }
@@ -139,10 +175,25 @@ export const updateUserForBusiness = async (
   return user.save();
 };
 
-export const deleteUserForBusiness = async (targetId: string, businessId: mongoose.Types.ObjectId) => {
+export const deleteUserForBusiness = async (
+  requester: IUser,
+  targetId: string,
+  businessId: mongoose.Types.ObjectId,
+) => {
+  if (targetId === (requester._id as mongoose.Types.ObjectId).toString()) {
+    throw new AppError('You cannot delete your own account.', 400);
+  }
+
   const user = await User.findOne({ _id: targetId, businessId });
   if (!user) throw new AppError('User not found', 404);
+
+  if (user.role === 'admin') {
+    const adminCount = await User.countDocuments({ businessId, role: 'admin' });
+    if (adminCount <= 1) throw new AppError('A business must keep at least one admin.', 400);
+  }
+
   await user.deleteOne();
+  await Business.findByIdAndUpdate(businessId, { $pull: { users: user._id } });
   return user;
 };
 
@@ -195,6 +246,7 @@ export const googleSignupComplete = async (idToken: string, businessName: string
     businessId: newBusiness._id,
   });
   newBusiness.owner = newUser._id;
+  newBusiness.users = [newUser._id as mongoose.Types.ObjectId];
 
   await newBusiness.save();
   await newUser.save();

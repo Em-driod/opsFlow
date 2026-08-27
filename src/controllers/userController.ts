@@ -1,8 +1,22 @@
 import type { Request, Response } from 'express';
-import { logActivity } from '../utils/activityLogger.js';
+import { logActivity, logAuthEvent } from '../utils/activityLogger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as userService from '../services/userService.js';
+
+const recordLogin = (
+  req: Request,
+  result: { _id?: unknown; name?: string; email?: string; businessId?: unknown },
+  method: string,
+) => {
+  if (!result?._id || !result.businessId) return;
+  logAuthEvent({
+    req,
+    action: 'LOGIN',
+    user: { _id: result._id, name: result.name || '', email: result.email || '', businessId: result.businessId },
+    details: { method },
+  });
+};
 
 // @desc    Register a new user and business
 // @route   POST /api/users/register
@@ -19,6 +33,7 @@ export const registerUser = asyncHandler(async (req: Request, res: Response) => 
 export const loginUser = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const result = await userService.loginUser(email, password);
+  recordLogin(req, result, 'password');
   res.json(result);
 });
 
@@ -101,7 +116,7 @@ export const updateUser = asyncHandler(async (req: Request, res: Response) => {
 // @access  Private/Admin (same business only)
 export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
-  const user = await userService.deleteUserForBusiness(req.params.id!, req.user.businessId);
+  const user = await userService.deleteUserForBusiness(req.user, req.params.id!, req.user.businessId);
 
   await logActivity({
     req,
@@ -121,6 +136,7 @@ export const googleAuth = asyncHandler(async (req: Request, res: Response) => {
   const { idToken } = req.body as { idToken: string };
   try {
     const result = await userService.googleAuth(idToken);
+    recordLogin(req, result as { _id?: unknown; name?: string; email?: string; businessId?: unknown }, 'google');
     res.json(result);
   } catch (error) {
     console.error(error);

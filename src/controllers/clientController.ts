@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { logActivity } from '../utils/activityLogger.js';
+import { logActivity, audit, diffFields } from '../utils/activityLogger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as clientService from '../services/clientService.js';
@@ -45,7 +45,20 @@ export const getClientById = asyncHandler(async (req: Request, res: Response) =>
 // @access  Private
 export const updateClient = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
+  const before = await clientService.getClientByIdForBusiness(req.params.id!, req.user.businessId);
   const updatedClient = await clientService.updateClientForBusiness(req.params.id!, req.user.businessId, req.body);
+  audit({
+    req,
+    action: 'UPDATE',
+    resource: 'CLIENT',
+    resourceId: req.params.id,
+    summary: `Updated client “${updatedClient.name}”`,
+    changes: diffFields(
+      before as unknown as Record<string, unknown>,
+      updatedClient as unknown as Record<string, unknown>,
+      ['name', 'email', 'phone', 'address', 'notes', 'status', 'businessValue'],
+    ),
+  });
   res.json(updatedClient);
 });
 
