@@ -4,7 +4,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as transactionService from '../services/transactionService.js';
 
-// @desc    Scan a transaction receipt/invoice using Gemini Vision
+// @desc    Scan a transaction receipt/invoice (OCR + hardcoded parsing, no AI)
 // @route   POST /api/transactions/scan
 // @access  Private
 export const scanTransaction = asyncHandler(async (req: Request, res: Response) => {

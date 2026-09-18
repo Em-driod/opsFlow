@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError.js';
 import * as invoiceService from '../services/invoiceService.js';
 
 /**
- * @desc    Scan an invoice using Gemini Vision
+ * @desc    Scan an invoice (OCR + hardcoded parsing, no AI)
  * @route   POST /api/invoices/scan
  * @access  Private
  */
