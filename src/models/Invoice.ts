@@ -24,7 +24,7 @@ export interface IInvoice extends Document {
   subtotal: number;
   tax: number;
   total: number;
-  status: 'draft' | 'sent' | 'partial' | 'paid' | 'overdue';
+  status: 'draft' | 'sent' | 'partial' | 'paid' | 'overdue' | 'void';
   dueDate: Date;
   notes?: string;
   transactionId?: mongoose.Types.ObjectId | undefined;
@@ -64,7 +64,7 @@ const InvoiceSchema: Schema = new Schema(
     subtotal: { type: Number, required: true },
     tax: { type: Number, default: 0 },
     total: { type: Number, required: true },
-    status: { type: String, enum: ['draft', 'sent', 'partial', 'paid', 'overdue'], default: 'draft' },
+    status: { type: String, enum: ['draft', 'sent', 'partial', 'paid', 'overdue', 'void'], default: 'draft' },
     dueDate: { type: Date, required: true },
     notes: { type: String },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },

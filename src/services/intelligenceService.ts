@@ -70,7 +70,7 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
     } else {
       try {
         const model = genAI.getGenerativeModel({
-          model: process.env.ADVISOR_MODEL || 'gemini-2.0-flash',
+          model: process.env.ADVISOR_MODEL || 'gemini-3.6-flash',
           systemInstruction:
             "You are an elite, highly intelligent financial CFO Assistant. Output MUST be valid JSON, containing an array of 'scenarios'.",
         });

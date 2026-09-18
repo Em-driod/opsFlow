@@ -133,7 +133,7 @@ export const parseNlpCommand = async (businessId: mongoose.Types.ObjectId, comma
   const contextDump = JSON.stringify(safeContext);
 
   const model = genAI.getGenerativeModel({
-    model: process.env.NLP_MODEL || 'gemini-2.0-flash',
+    model: process.env.NLP_MODEL || 'gemini-3.6-flash',
     systemInstruction: `You are an elite, highly intelligent financial CFO Assistant for OpsFlow.
 You have access to the user's anonymised live business data for the *current calendar month*.
 Client real names and emails have been replaced with aliases (e.g., "Client A") for privacy.

@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import axios from 'axios';
 import crypto from 'crypto';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import Invoice, { type IInvoice } from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 import Business from '../models/Business.js';
@@ -12,65 +11,22 @@ import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { sendInvoiceEmail, sendReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { extractDocumentText } from '../utils/documentExtraction.js';
+import { parseInvoiceText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
-
 // ─────────────────────────────────────────────────────────────────────────────
-// INVOICE OCR UPGRADE: Gemini Vision replacing Tesseract + multi-regex
-//
-// The previous implementation used Tesseract + 5 separate regex functions
-// (extractAmounts, extractDate, extractTax, extractLineItems, extractInvoiceNumber).
-// This was extremely brittle — a single design variation in an invoice layout
-// would cause the wrong total to be picked, no date to be found, or line
-// items to be silently dropped.
-//
-// Gemini Vision reads the invoice like a human would, understands context,
-// and returns a structured JSON object in one call. No regex involved.
+// Invoice scanning is deliberately hardcoded, not AI-driven: OCR (images) /
+// text-layer extraction (PDFs) via documentExtraction.ts, then regex parsing
+// via documentParsing.ts. This used to call Gemini Vision, but a hosted
+// model getting deprecated out from under the app (gemini-2.0-flash was
+// retired by Google) silently broke scanning for every user with no code
+// change on our end. A local, hardcoded pipeline can't be deprecated by a
+// third party — the tradeoff is it only recognizes patterns we've explicitly
+// written (labeled fields like "Invoice Number:", "Total:", etc.), so an
+// invoice with a very unusual layout may come back with gaps rather than
+// best-effort guessed.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const INVOICE_VISION_PROMPT = `
-You are a professional invoice parser. Examine the attached invoice image carefully.
-Extract the following information and return ONLY a valid JSON object — no markdown wrappers:
-{
-  "invoiceNumber": "string or null",
-  "vendorName": "string or null",
-  "clientName": "string or null",
-  "invoiceDate": "YYYY-MM-DD or null",
-  "dueDate": "YYYY-MM-DD or null",
-  "subtotal": number or null,
-  "tax": number or null,
-  "total": number (required — your best estimate if not clearly labelled),
-  "currency": "USD" | "GBP" | "EUR" | "NGN" | "other",
-  "lineItems": [
-    { "description": "string", "quantity": number, "price": number, "total": number }
-  ]
-}
-If a lineItems section is not visible, derive one item from the total.
-Always return valid JSON. Never null out the \"total\" field.
-`;
-
-const extractInvoiceWithVision = async (buffer: Buffer, mimeType: string): Promise<unknown | null> => {
-  if (!apiKey) return null;
-  try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent([
-      INVOICE_VISION_PROMPT,
-      { inlineData: { data: buffer.toString('base64'), mimeType } },
-    ]);
-    const raw = result.response
-      .text()
-      .trim()
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('[InvoiceVision] Extraction failed:', err);
-    return null;
-  }
-};
 
 /**
  * Opaque, non-sequential invoice number: date-stamped + random suffix.
@@ -90,9 +46,10 @@ const generateInvoiceNumber = async (): Promise<string> => {
 };
 
 export const scanInvoiceImage = async (buffer: Buffer, mimetype: string) => {
-  const visionResult = await extractInvoiceWithVision(buffer, mimetype);
-  if (!visionResult) throw new AppError('Could not parse invoice. Please try a clearer image.', 422);
-  return visionResult;
+  const text = await extractDocumentText(buffer, mimetype);
+  const parsed = parseInvoiceText(text);
+  if (!parsed) throw new AppError('Could not parse invoice. Please try a clearer image, or check that the total is labeled (e.g. "Total:").', 422);
+  return { ...parsed, text };
 };
 
 export const createInvoice = async (
@@ -130,8 +87,8 @@ export const createInvoice = async (
   // depositAmount is the modern path — an explicit amount paid at creation, which
   // can be partial. recordAsIncome is the older "fully paid right now" shortcut,
   // kept working by treating it as a deposit of the full total. Both flow through
-  // the same payment logic so the audit log, notification, and stock deduction
-  // stay consistent no matter how the invoice was born already-paid.
+  // the same payment logic so the audit log and notification stay consistent no
+  // matter how the invoice was born already-paid.
   const initialPayment = depositAmount && depositAmount > 0 ? depositAmount : recordAsIncome ? total : 0;
   let willFullyPay = false;
   if (initialPayment > 0) {
@@ -144,9 +101,9 @@ export const createInvoice = async (
 
   const createdInvoice = await invoice.save();
 
-  if (willFullyPay) {
-    await applyStockForInvoiceLineItems(user.businessId, createdInvoice);
-  }
+  // Stock moves with the invoice itself, same as a receipt — the catalog item
+  // left the shelf the moment it was billed, whether or not it's been paid for yet.
+  await applyStockForInvoiceLineItems(user.businessId, createdInvoice);
 
   await createNotification({
     businessId: user.businessId,
@@ -189,10 +146,10 @@ export const getInvoiceByIdForBusiness = async (id: string, businessId: mongoose
   return invoice;
 };
 
-// Reduces (or, on payment undo, restores) stock for any catalog items on the
-// invoice — only ever called once the invoice is fully paid / un-paid, not on
-// partial payments, since the sale isn't settled until then. Same "not
-// explicitly false" opt-out and allow-negative behavior as receipts.
+// Reduces (or, on void, restores) stock for any catalog items on the invoice.
+// The decrement happens once, at invoice creation, regardless of payment
+// status — same timing as a receipt. Same "not explicitly false" opt-out and
+// allow-negative behavior as receipts.
 const applyStockForInvoiceLineItems = async (
   businessId: mongoose.Types.ObjectId,
   invoice: IInvoice,
@@ -205,7 +162,7 @@ const applyStockForInvoiceLineItems = async (
     items.map((item) =>
       Product.updateOne(
         { _id: item.productId, businessId, trackStock: true },
-        { $inc: { stock: direction * item.quantity } },
+        { $inc: { stock: direction * Number(item.quantity) } },
       ),
     ),
   );
@@ -270,15 +227,12 @@ export const recordPaymentForInvoice = async (
   const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
   if (!invoice) throw new AppError('Invoice not found', 404);
   if (invoice.status === 'paid') throw new AppError('Invoice is already fully paid', 400);
+  if (invoice.status === 'void') throw new AppError('This invoice has been voided and can no longer be changed', 400);
 
   const amount = Number(params.amount);
   const { willFullyPay } = await applyPaymentToInvoice(invoice, user.businessId, user._id as mongoose.Types.ObjectId, params);
 
   const updatedInvoice = await invoice.save();
-
-  if (willFullyPay) {
-    await applyStockForInvoiceLineItems(user.businessId, updatedInvoice);
-  }
 
   await createNotification({
     businessId: user.businessId,
@@ -296,17 +250,17 @@ export const recordPaymentForInvoice = async (
   return updatedInvoice;
 };
 
-// Removes the most recently recorded payment — deletes its linked transaction,
-// restores stock if that payment was the one that completed full payment, and
-// drops status back to 'partial' (if other payments remain) or 'sent' (if not).
-// Only the last payment can be undone, not arbitrary history, to avoid the mess
-// of recalculating everything after a payment buried earlier in the log.
+// Removes the most recently recorded payment — deletes its linked transaction
+// and drops status back to 'partial' (if other payments remain) or 'sent' (if
+// not). Doesn't touch stock: that moved at invoice creation and isn't tied to
+// payment status. Only the last payment can be undone, not arbitrary history,
+// to avoid the mess of recalculating everything after a payment buried
+// earlier in the log.
 export const undoLastPaymentForInvoice = async (id: string, user: IUser) => {
   const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
   if (!invoice) throw new AppError('Invoice not found', 404);
   if (invoice.payments.length === 0) throw new AppError('This invoice has no recorded payments to undo', 400);
 
-  const wasFullyPaid = invoice.status === 'paid';
   const lastPayment = invoice.payments[invoice.payments.length - 1]!;
   invoice.payments.pop();
 
@@ -320,10 +274,6 @@ export const undoLastPaymentForInvoice = async (id: string, user: IUser) => {
   invoice.status = invoice.payments.length > 0 ? 'partial' : 'sent';
 
   const updatedInvoice = await invoice.save();
-
-  if (wasFullyPaid) {
-    await applyStockForInvoiceLineItems(user.businessId, updatedInvoice, 1);
-  }
 
   await createNotification({
     businessId: user.businessId,
@@ -351,15 +301,54 @@ export const updateInvoiceStatusForBusiness = async (
   if (status === 'paid') {
     const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
     if (!invoice) throw new AppError('Invoice not found', 404);
+    if (invoice.status === 'void') throw new AppError('This invoice has been voided and can no longer be changed', 400);
     if (invoice.balance <= 0) return invoice;
     return recordPaymentForInvoice(id, user, { amount: invoice.balance, method: 'manual' });
   }
 
+  if (status === 'void') {
+    return voidInvoiceForBusiness(id, user);
+  }
+
   const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
   if (!invoice) throw new AppError('Invoice not found', 404);
+  if (invoice.status === 'void') throw new AppError('This invoice has been voided and can no longer be changed', 400);
 
   invoice.status = status;
   const updatedInvoice = await invoice.save();
+
+  enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
+  fire('invoice.updated', String(user.businessId), updatedInvoice.toObject());
+  emitToBusiness(String(user.businessId), 'data_updated', { type: 'invoice', action: 'updated' });
+
+  return updatedInvoice;
+};
+
+// Cancels an invoice for good: only allowed when no payments are recorded
+// against it (undo those first via the payments endpoint — voiding a partly
+// paid invoice would mean silently reversing money someone already received,
+// which is a business decision this endpoint shouldn't make on its own).
+// Restores whatever stock left the shelf at creation, since the sale never
+// actually completed.
+export const voidInvoiceForBusiness = async (id: string, user: IUser) => {
+  const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
+  if (!invoice) throw new AppError('Invoice not found', 404);
+  if (invoice.status === 'void') throw new AppError('Invoice is already void', 400);
+  if (invoice.payments.length > 0) {
+    throw new AppError('This invoice has payments recorded against it — undo them first, then void.', 400);
+  }
+
+  invoice.status = 'void';
+  const updatedInvoice = await invoice.save();
+
+  await applyStockForInvoiceLineItems(user.businessId, updatedInvoice, 1);
+
+  await createNotification({
+    businessId: user.businessId,
+    userId: user._id as mongoose.Types.ObjectId,
+    message: `Invoice #${updatedInvoice.invoiceNumber} was voided — stock restored.`,
+    link: `/invoices/${updatedInvoice._id}`,
+  });
 
   enqueue({ type: 'invoice', action: 'updated', data: updatedInvoice.toObject(), businessId: String(user.businessId) });
   fire('invoice.updated', String(user.businessId), updatedInvoice.toObject());
@@ -541,7 +530,6 @@ export const handlePaystackWebhook = async (rawBody: unknown, signature: unknown
   }
 
   await invoice.save();
-  await applyStockForInvoiceLineItems(invoice.businessId, invoice);
 
   const owningBusiness = await Business.findById(invoice.businessId).select('owner');
   if (owningBusiness?.owner) {

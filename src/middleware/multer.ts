@@ -4,12 +4,12 @@ import type { Request } from 'express';
 // Configure multer for memory storage to handle file as buffer
 const storage = multer.memoryStorage();
 
-// Filter to allow only image files
+// Filter to allow only images or PDFs (used by the invoice/transaction scanners)
 const fileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
-  if (file.mimetype.startsWith('image/')) {
+  if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
     cb(null, true);
   } else {
-    cb(new Error('Not an image! Please upload an image file.'));
+    cb(new Error('Please upload an image or a PDF file.'));
   }
 };
 

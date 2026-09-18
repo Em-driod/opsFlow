@@ -24,8 +24,15 @@ export interface ITransaction extends Document {
   plaidTransactionId?: string;
   bankAccountId?: string;
   isReconciled?: boolean;
-  source?: 'manual' | 'bank_sync' | 'ocr_scan' | 'csv_import';
+  source?: 'manual' | 'bank_sync' | 'ocr_scan' | 'csv_import' | 'integration';
   receiptImage?: string;
+
+  // ─── External Integration Fields (generic — not tied to any one provider) ──
+  // When `source === 'integration'`, `externalSource` names the sending system
+  // (e.g. "foige") and `externalId` is that system's own id for the record.
+  // The pair is unique per business so repeated deliveries are idempotent.
+  externalSource?: string;
+  externalId?: string;
 
   createdAt: Date;
   updatedAt: Date;
@@ -56,10 +63,12 @@ const TransactionSchema: Schema = new Schema(
     isReconciled: { type: Boolean, default: false },
     source: {
       type: String,
-      enum: ['manual', 'bank_sync', 'ocr_scan', 'csv_import'],
+      enum: ['manual', 'bank_sync', 'ocr_scan', 'csv_import', 'integration'],
       default: 'manual',
     },
     receiptImage: { type: String },
+    externalSource: { type: String },
+    externalId: { type: String },
   },
   { timestamps: true },
 );
@@ -68,5 +77,13 @@ const TransactionSchema: Schema = new Schema(
 TransactionSchema.index({ businessId: 1, createdAt: -1 });
 TransactionSchema.index({ businessId: 1, date: -1 });
 TransactionSchema.index({ plaidTransactionId: 1 }, { sparse: true });
+
+// Idempotency guard for integration ingestion: one (business, externalSource,
+// externalId) triple can only ever produce a single transaction. `partialFilter`
+// keeps the constraint off the millions of manual rows that have no externalId.
+TransactionSchema.index(
+  { businessId: 1, externalSource: 1, externalId: 1 },
+  { unique: true, partialFilterExpression: { externalId: { $type: 'string' } } },
+);
 
 export default mongoose.model<ITransaction>('Transaction', TransactionSchema);
