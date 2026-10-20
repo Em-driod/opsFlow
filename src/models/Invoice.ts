@@ -6,6 +6,8 @@ export interface IInvoicePayment {
   method: string;
   transactionId: mongoose.Types.ObjectId;
   note?: string;
+  // Payment-gateway reference (e.g. Paystack). Used to make webhook processing idempotent.
+  reference?: string;
 }
 
 export interface IInvoice extends Document {
@@ -49,6 +51,7 @@ const InvoicePaymentSchema: Schema = new Schema(
     method: { type: String, default: 'manual' },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     note: { type: String },
+    reference: { type: String },
   },
   { _id: false },
 );

@@ -7,6 +7,7 @@ import Business from '../models/Business.js';
 import { createNotification } from './notificationService.js';
 import { sendProposalEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { generateInvoiceNumber } from './invoiceService.js';
 
 const getNextProposalNumber = async (businessId: string): Promise<string> => {
   const COUNTER_ID = `proposals_${businessId}`;
@@ -127,18 +128,9 @@ export const convertProposalToInvoice = async (
     throw new AppError(exists ? 'Already converted' : 'Proposal not found', exists ? 400 : 404);
   }
 
-  const INV_COUNTER_ID = 'invoices';
-  const invExists = await Counter.exists({ _id: INV_COUNTER_ID });
-  if (!invExists) {
-    const existingCount = await Invoice.countDocuments();
-    try {
-      await Counter.create({ _id: INV_COUNTER_ID, seq: existingCount });
-    } catch (e) {
-      if ((e as { code?: number }).code !== 11000) throw e;
-    }
-  }
-  const invCounter = await Counter.findOneAndUpdate({ _id: INV_COUNTER_ID }, { $inc: { seq: 1 } }, { new: true });
-  const invoiceNumber = `INV-${invCounter!.seq.toString().padStart(4, '0')}`;
+  // Same opaque INV-YYMMDD-XXXXXXXX scheme as every other invoice (sequential
+  // numbers would leak how many invoices a business has issued).
+  const invoiceNumber = await generateInvoiceNumber();
 
   const dueDate = dueDateRaw
     ? new Date(dueDateRaw)

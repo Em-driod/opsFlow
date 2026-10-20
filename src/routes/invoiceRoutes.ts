@@ -14,6 +14,7 @@ import {
   paystackWebhook,
 } from '../controllers/invoiceController.js';
 import { protect } from '../middleware/auth.js';
+import { idempotency } from '../middleware/idempotency.js';
 import upload from '../middleware/multer.js';
 
 const router = express.Router();
@@ -21,14 +22,15 @@ const router = express.Router();
 // Public routes (no auth)
 router.get('/public/:id', getPublicInvoice);
 router.post('/public/:id/pay/init', initPaystackPayment);
+// Signature-verified against the raw body (captured in middleware/bodyParsers.ts)
 router.post('/webhooks/paystack', paystackWebhook);
 
 // Protected routes
-router.route('/').post(protect, createInvoice).get(protect, getInvoices);
+router.route('/').post(protect, idempotency, createInvoice).get(protect, getInvoices);
 router.post('/scan', protect, upload.single('image'), scanInvoice);
 router.route('/:id').get(protect, getInvoiceById);
 router.route('/:id/status').put(protect, updateInvoiceStatus);
-router.post('/:id/payments', protect, recordPayment);
+router.post('/:id/payments', protect, idempotency, recordPayment);
 router.delete('/:id/payments/last', protect, undoLastPayment);
 router.post('/:id/send', protect, sendInvoice);
 router.post('/:id/whatsapp', protect, getWhatsAppLink);

@@ -73,10 +73,10 @@ const TransactionSchema: Schema = new Schema(
   { timestamps: true },
 );
 
-// Index for fast bank-sync deduplication lookups
 TransactionSchema.index({ businessId: 1, createdAt: -1 });
 TransactionSchema.index({ businessId: 1, date: -1 });
-TransactionSchema.index({ plaidTransactionId: 1 }, { sparse: true });
+// plaidTransactionId already gets its (unique, sparse) index from the field
+// definition above — declaring it again here conflicted with that index.
 
 // Idempotency guard for integration ingestion: one (business, externalSource,
 // externalId) triple can only ever produce a single transaction. `partialFilter`

@@ -48,7 +48,7 @@ describe('POST /api/payrolls (create)', () => {
       .post('/api/payrolls')
       .set('Authorization', `Bearer ${token}`)
       .send({ staffName: 'Jane', salary: 100000 });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
   it('lets an admin create a payroll entry with a derived payPeriod', async () => {
@@ -149,7 +149,7 @@ describe('PUT /api/payrolls/:id (mark paid)', () => {
       .put(`/api/payrolls/${payroll._id}`)
       .set('Authorization', `Bearer ${staffToken}`)
       .send({ status: 'paid' });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 });
 

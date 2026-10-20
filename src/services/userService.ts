@@ -7,6 +7,7 @@ import User, { type IUser } from '../models/User.js';
 import Business from '../models/Business.js';
 import { sendPasswordResetEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { LEGACY_DANGEROUS } from '../middleware/sanitize.js';
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_LOGIN_CLIENT_ID);
 
@@ -67,8 +68,18 @@ export const registerUser = async (params: {
 
 export const loginUser = async (email: string, password: string) => {
   const user = await User.findOne({ email });
-  if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
-    throw new AppError('Invalid email or password', 401);
+  if (!user || !user.password) throw new AppError('Invalid email or password', 401);
+
+  if (!(await bcrypt.compare(password, user.password))) {
+    // Passwords used to pass through the body sanitiser, which stripped < > " '
+    // before hashing. Accept that legacy form once, then re-hash the real
+    // password so the account is migrated and this branch stops applying.
+    const legacy = password.replace(LEGACY_DANGEROUS, '');
+    if (legacy === password || !(await bcrypt.compare(legacy, user.password))) {
+      throw new AppError('Invalid email or password', 401);
+    }
+    user.password = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    await user.save();
   }
   return authResponse(user);
 };
@@ -80,10 +91,10 @@ export const createStaffUser = async (
   const { name, email, password, role, businessId } = params;
 
   if (!requester.businessId || requester.role !== 'admin') {
-    throw new AppError('Not authorized - admin access required', 401);
+    throw new AppError('Not authorized - admin access required', 403);
   }
   if (requester.businessId.toString() !== businessId) {
-    throw new AppError('Not authorized to create users for this business', 401);
+    throw new AppError('Not authorized to create users for this business', 403);
   }
 
   const userExists = await User.findOne({ email });

@@ -7,6 +7,7 @@ import { enqueue } from './exportQueueService.js';
 import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { AppError } from '../utils/AppError.js';
+import { containsRegex } from '../utils/regex.js';
 
 const assertEmailNotTaken = async (
   businessId: mongoose.Types.ObjectId,
@@ -46,7 +47,7 @@ export const getClientsForBusiness = async (
 
   const filter: Record<string, unknown> = { businessId };
   if (params.search) {
-    const re = new RegExp(String(params.search), 'i');
+    const re = containsRegex(String(params.search));
     filter.$or = [{ name: re }, { email: re }, { phone: re }];
   }
 

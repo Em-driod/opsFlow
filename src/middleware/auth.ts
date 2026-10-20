@@ -52,6 +52,7 @@ export const admin = (req: Request, res: Response, next: NextFunction) => {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
-    res.status(401).json({ message: 'Not authorized as an admin' });
+    // 403, not 401: the caller IS authenticated, just not permitted.
+    res.status(403).json({ message: 'Not authorized as an admin' });
   }
 };

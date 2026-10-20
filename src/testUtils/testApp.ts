@@ -8,10 +8,13 @@ import transactionRoutes from '../routes/transactionRoutes.js';
 import reportingRoutes from '../routes/reportingRoutes.js';
 import { protect, admin } from '../middleware/auth.js';
 import { sanitizeBody } from '../middleware/sanitize.js';
+import { jsonParser } from '../middleware/bodyParsers.js';
+import receiptRoutes from '../routes/receiptRoutes.js';
+import clientRoutes from '../routes/clientRoutes.js';
 
 export const createTestApp = () => {
   const app = express();
-  app.use(express.json());
+  app.use(jsonParser); // same parser as production (keeps raw bytes for webhooks)
   app.use(sanitizeBody);
   app.use('/api/users', userRoutes);
   app.use('/api/businesses', businessRoutes);
@@ -20,6 +23,8 @@ export const createTestApp = () => {
   app.use('/api/tax', taxRoutes);
   app.use('/api/transactions', transactionRoutes);
   app.use('/api/reporting', reportingRoutes);
+  app.use('/api/receipts', receiptRoutes);
+  app.use('/api/clients', clientRoutes);
 
   // Minimal routes for exercising the auth middleware directly.
   app.get('/api/test/protected', protect, (req: Request, res: Response) => {

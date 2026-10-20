@@ -84,7 +84,8 @@ describe('admin middleware', () => {
     const res = await request(app)
       .get('/api/test/admin-only')
       .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(401);
+    // Authenticated but not permitted → 403 Forbidden, not 401.
+    expect(res.status).toBe(403);
   });
 
   it('allows an admin user', async () => {

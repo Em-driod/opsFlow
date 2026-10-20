@@ -38,34 +38,28 @@ import { initCronJobs } from './services/cronService.js';
 import { initSocketServer } from './services/socketService.js';
 import rateLimit from 'express-rate-limit';
 import { sanitizeBody } from './middleware/sanitize.js';
+import { jsonParser, urlencodedParser } from './middleware/bodyParsers.js';
+import { isAllowedOrigin } from './config/origins.js';
 
-/* ─────────────────────────────────────────────
-   CORS — only allow known origins
-   Add your production domain to ALLOWED_ORIGINS
-   or set ALLOWED_ORIGINS=https://app.morniy.com in .env
-───────────────────────────────────────────── */
-const ALLOWED_ORIGINS: string[] = [
-  'http://localhost:5173',   // Vite dev
-  'http://localhost:4173',   // Vite preview
-  'http://localhost:3000',
-  'capacitor://localhost',   // Capacitor Android/iOS
-  'https://localhost',
-  ...(process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-    : []),
-];
-
+/* ── CORS: only allow known origins (shared with Socket.IO, see config/origins.ts) ── */
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman in dev)
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+  exposedHeaders: ['Idempotent-Replayed'],
 };
+
+/* ── Fail fast on missing config instead of running half-configured ── */
+const REQUIRED_ENV = ['MONGO_URI', 'JWT_SECRET'];
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error(`❌ Missing required environment variables: ${missingEnv.join(', ')}`);
+  process.exit(1);
+}
 
 const startServer = async () => {
   try {
@@ -91,8 +85,9 @@ const startServer = async () => {
     app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
     /* ── Body parsing ── */
-    app.use(express.json({ limit: '10mb' }));
-    app.use(express.urlencoded({ limit: '10mb', extended: true }));
+    // jsonParser also keeps the raw bytes for signed webhooks (Paystack).
+    app.use(jsonParser);
+    app.use(urlencodedParser);
 
     /* ── Input sanitisation ── */
     app.use(sanitizeBody);

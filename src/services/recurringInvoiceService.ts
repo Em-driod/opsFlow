@@ -1,24 +1,10 @@
 import mongoose from 'mongoose';
 import RecurringInvoice from '../models/RecurringInvoice.js';
 import Invoice from '../models/Invoice.js';
-import Counter from '../models/Counter.js';
+import { generateInvoiceNumber } from './invoiceService.js';
+import { runInTransaction } from '../utils/transaction.js';
 import { AppError } from '../utils/AppError.js';
 import type { IUser } from '../models/User.js';
-
-const generateInvoiceNumber = async (): Promise<string> => {
-  const COUNTER_ID = 'invoices';
-  const exists = await Counter.exists({ _id: COUNTER_ID });
-  if (!exists) {
-    const existingCount = await Invoice.countDocuments();
-    try {
-      await Counter.create({ _id: COUNTER_ID, seq: existingCount });
-    } catch (e) {
-      if ((e as { code?: number }).code !== 11000) throw e;
-    }
-  }
-  const counter = await Counter.findOneAndUpdate({ _id: COUNTER_ID }, { $inc: { seq: 1 } }, { new: true });
-  return `INV-${counter!.seq.toString().padStart(4, '0')}`;
-};
 
 const computeNextRunDate = (
   frequency: 'weekly' | 'monthly' | 'quarterly' | 'yearly',
@@ -119,24 +105,40 @@ export const generateDueRecurringInvoices = async (): Promise<void> => {
       dueDate.setDate(dueDate.getDate() + template.dueDaysAfter);
 
       const invoiceNumber = await generateInvoiceNumber();
-      await Invoice.create({
-        businessId: template.businessId,
-        clientId: template.clientId || null,
-        customClientName: template.customClientName || null,
-        recipientEmail: template.recipientEmail || null,
-        invoiceNumber,
-        lineItems: template.lineItems,
-        subtotal: template.subtotal,
-        tax: template.tax,
-        total: template.total,
-        notes: template.notes,
-        status: 'draft',
-        dueDate,
-      });
+      const nextRunDate = computeNextRunDate(template.frequency, now, template.dayOfMonth);
 
-      template.lastRunDate = now;
-      template.nextRunDate = computeNextRunDate(template.frequency, now, template.dayOfMonth);
-      await template.save();
+      // Claim this run and create the invoice atomically. The claim only matches
+      // if nextRunDate is unchanged, so if the job runs twice (overlapping ticks,
+      // several server instances) only one run generates the invoice, and a crash
+      // can't leave an invoice without the schedule advancing (or vice versa).
+      await runInTransaction(async (session) => {
+        const claimed = await RecurringInvoice.findOneAndUpdate(
+          { _id: template._id, isActive: true, nextRunDate: template.nextRunDate },
+          { $set: { lastRunDate: now, nextRunDate } },
+          { session, new: true },
+        );
+        if (!claimed) return; // another run already handled it
+
+        await Invoice.create(
+          [
+            {
+              businessId: template.businessId,
+              clientId: template.clientId || null,
+              customClientName: template.customClientName || null,
+              recipientEmail: template.recipientEmail || null,
+              invoiceNumber,
+              lineItems: template.lineItems,
+              subtotal: template.subtotal,
+              tax: template.tax,
+              total: template.total,
+              notes: template.notes,
+              status: 'draft',
+              dueDate,
+            },
+          ],
+          { session },
+        );
+      });
 
       console.log(`[Cron] Generated recurring invoice ${invoiceNumber} for business ${template.businessId}`);
     } catch (err) {

@@ -1,16 +1,18 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 
-let mongod: MongoMemoryServer | undefined;
+// A single-node replica set (not a standalone server) so multi-document
+// transactions work in tests exactly as they do on MongoDB Atlas.
+let mongod: MongoMemoryReplSet | undefined;
 
 export const connect = async (): Promise<void> => {
-  mongod = await MongoMemoryServer.create({
-    instance: {
-      ip: '127.0.0.1',
-      launchTimeout: 60000,
-    },
+  mongod = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: 'wiredTiger', ip: '127.0.0.1' },
+    instanceOpts: [{ launchTimeout: 60000 }],
   });
   await mongoose.connect(mongod.getUri());
+  // Transactions can't create collections/indexes on the fly — build them up front.
+  await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
 };
 
 export const closeDatabase = async (): Promise<void> => {

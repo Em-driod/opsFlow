@@ -2,12 +2,13 @@ import mongoose from 'mongoose';
 import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
+import { containsRegex } from '../utils/regex.js';
 
 export const globalSearchForBusiness = async (businessId: mongoose.Types.ObjectId, query: string) => {
   const q = query.trim();
   if (!q || q.length < 2) return { clients: [], invoices: [], transactions: [] };
 
-  const regex = new RegExp(q, 'i');
+  const regex = containsRegex(q);
   const limit = 5;
 
   const [clients, invoices, transactions] = await Promise.all([

@@ -7,6 +7,7 @@ import { emitToBusiness } from './socketService.js';
 import { predictCategory, learnTransactionCategory } from './learningService.js';
 import { inferTaxCategory, type NigerianTaxCategory } from './nigerianTax.js';
 import { AppError } from '../utils/AppError.js';
+import { escapeRegex } from '../utils/regex.js';
 import { extractDocumentText } from '../utils/documentExtraction.js';
 import { parseTransactionText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
@@ -133,7 +134,7 @@ export const getTransactionsForBusiness = async (
   const filter: Record<string, unknown> = { businessId };
   if (params.clientId) filter.clientId = params.clientId;
   if (params.projectId) filter.projectId = params.projectId;
-  if (params.search) filter.description = { $regex: String(params.search), $options: 'i' };
+  if (params.search) filter.description = { $regex: escapeRegex(String(params.search)), $options: 'i' };
   if (params.category) filter.category = params.category;
   if (params.type) filter.type = params.type;
   if (params.startDate || params.endDate) {

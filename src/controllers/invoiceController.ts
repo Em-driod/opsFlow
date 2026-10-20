@@ -151,10 +151,10 @@ export const initPaystackPayment = asyncHandler(async (req: Request, res: Respon
  * @access  Public (verified by signature)
  */
 export const paystackWebhook = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    await invoiceService.handlePaystackWebhook(req.body, req.headers['x-paystack-signature']);
-  } catch {
-    return res.sendStatus(401);
-  }
-  res.sendStatus(200);
+  // Verified against the raw bytes captured by jsonParser (middleware/bodyParsers.ts).
+  // Duplicates and irrelevant events still get 200 so Paystack stops retrying.
+  // Bad signatures get 401; unexpected errors fall through to the error handler
+  // as 5xx, which makes Paystack retry later instead of the payment being lost.
+  const result = await invoiceService.handlePaystackWebhook(req.rawBody, req.headers['x-paystack-signature']);
+  res.status(200).json({ received: true, result });
 });

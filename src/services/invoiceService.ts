@@ -1,16 +1,19 @@
-import mongoose from 'mongoose';
+import mongoose, { type ClientSession } from 'mongoose';
 import axios from 'axios';
 import crypto from 'crypto';
 import Invoice, { type IInvoice } from '../models/Invoice.js';
 import Transaction from '../models/Transaction.js';
 import Business from '../models/Business.js';
 import Product from '../models/Product.js';
+import User from '../models/User.js';
 import { createNotification } from '../services/notificationService.js';
 import { enqueue } from './exportQueueService.js';
 import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { sendInvoiceEmail, sendReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { escapeRegex } from '../utils/regex.js';
+import { runInTransaction, isDuplicateKeyError } from '../utils/transaction.js';
 import { extractDocumentText } from '../utils/documentExtraction.js';
 import { parseInvoiceText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
@@ -34,7 +37,7 @@ import type { IUser } from '../models/User.js';
  * a business has issued to anyone who sees one. Mirrors the receipt-number
  * scheme in receiptService.ts.
  */
-const generateInvoiceNumber = async (): Promise<string> => {
+export const generateInvoiceNumber = async (): Promise<string> => {
   for (let attempt = 0; attempt < 3; attempt++) {
     const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
     const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 hex chars
@@ -69,20 +72,9 @@ export const createInvoice = async (
   const dueDate = rawDueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const subtotal = lineItems.reduce((acc, item) => acc + item.total, 0);
-  const total = subtotal + subtotal * (tax / 100);
+  const total = roundMoney(subtotal + subtotal * (tax / 100));
 
-  const invoice = new Invoice({
-    businessId: user.businessId,
-    clientId: clientId || null,
-    customClientName: customClientName || null,
-    invoiceNumber: await generateInvoiceNumber(),
-    lineItems,
-    subtotal,
-    tax,
-    total,
-    dueDate,
-    notes,
-  });
+  const invoiceNumber = await generateInvoiceNumber();
 
   // depositAmount is the modern path — an explicit amount paid at creation, which
   // can be partial. recordAsIncome is the older "fully paid right now" shortcut,
@@ -91,15 +83,35 @@ export const createInvoice = async (
   // matter how the invoice was born already-paid.
   const initialPayment = depositAmount && depositAmount > 0 ? depositAmount : recordAsIncome ? total : 0;
   let willFullyPay = false;
-  if (initialPayment > 0) {
-    ({ willFullyPay } = await applyPaymentToInvoice(invoice, user.businessId, user._id as mongoose.Types.ObjectId, {
-      amount: initialPayment,
-      method: 'manual',
-      note: 'Recorded at invoice creation',
-    }));
-  }
 
-  const createdInvoice = await invoice.save();
+  // Invoice + deposit transaction commit together, so a crash can't leave an
+  // income transaction pointing at an invoice that was never saved. The callback
+  // builds everything from scratch because withTransaction may re-run it.
+  const createdInvoice = await runInTransaction(async (session) => {
+    const invoice = new Invoice({
+      businessId: user.businessId,
+      clientId: clientId || null,
+      customClientName: customClientName || null,
+      invoiceNumber,
+      lineItems,
+      subtotal,
+      tax,
+      total,
+      dueDate,
+      notes,
+    });
+    willFullyPay = false;
+    if (initialPayment > 0) {
+      ({ willFullyPay } = await applyPaymentToInvoice(
+        invoice,
+        user.businessId,
+        user._id as mongoose.Types.ObjectId,
+        { amount: initialPayment, method: 'manual', note: 'Recorded at invoice creation' },
+        session,
+      ));
+    }
+    return invoice.save({ session });
+  });
 
   // Stock moves with the invoice itself, same as a receipt — the catalog item
   // left the shelf the moment it was billed, whether or not it's been paid for yet.
@@ -126,7 +138,7 @@ export const getInvoicesForBusiness = async (
 ) => {
   const filter: Record<string, unknown> = { businessId };
   if (params.status) filter.status = params.status;
-  if (params.search) filter.invoiceNumber = { $regex: String(params.search), $options: 'i' };
+  if (params.search) filter.invoiceNumber = { $regex: escapeRegex(String(params.search)), $options: 'i' };
   if (params.clientId) filter.clientId = params.clientId;
 
   const pageNum = Math.max(1, parseInt(String(params.page || '1')));
@@ -168,18 +180,24 @@ const applyStockForInvoiceLineItems = async (
   );
 };
 
+// Rounds to 2 decimal places. Amounts are stored as numbers, so every payment
+// is normalised to whole kobo/cents to stop floating-point drift accumulating.
+const roundMoney = (n: number) => Math.round(n * 100) / 100;
+
 // Mutates `invoice` in place: validates the amount, creates the income transaction,
 // logs it in payments[], and updates status. Does NOT save — the caller saves once
 // (so it composes cleanly with invoice creation, which has its own initial save)
 // and handles the post-save side effects (stock, notification) since those differ
 // slightly between "paying an existing invoice" and "invoice born already paid".
+// Pass the caller's `session` so the transaction and invoice commit atomically.
 const applyPaymentToInvoice = async (
   invoice: IInvoice,
   businessId: mongoose.Types.ObjectId,
   recordedBy: mongoose.Types.ObjectId | undefined,
-  params: { amount: number; method?: string; note?: string },
+  params: { amount: number; method?: string; note?: string; reference?: string },
+  session?: ClientSession,
 ) => {
-  const amount = Number(params.amount);
+  const amount = roundMoney(Number(params.amount));
   if (!amount || amount <= 0) throw new AppError('Enter a valid payment amount', 400);
   if (amount > invoice.balance + 0.01) {
     throw new AppError(`Amount exceeds the remaining balance of ${invoice.balance.toFixed(2)}`, 400);
@@ -187,52 +205,74 @@ const applyPaymentToInvoice = async (
 
   const willFullyPay = amount >= invoice.balance - 0.01;
 
-  const incomeTransaction = await Transaction.create({
-    clientId: invoice.clientId || null,
-    businessId,
-    amount,
-    type: 'income',
-    category: 'Sales',
-    description: `Payment received for Invoice #${invoice.invoiceNumber}${willFullyPay ? '' : ' (partial)'}`,
-    recordedBy,
-    source: 'manual',
-  });
+  const [incomeTransaction] = await Transaction.create(
+    [
+      {
+        clientId: invoice.clientId || null,
+        businessId,
+        amount,
+        type: 'income',
+        category: 'Sales',
+        description: `Payment received for Invoice #${invoice.invoiceNumber}${willFullyPay ? '' : ' (partial)'}`,
+        recordedBy,
+        source: 'manual',
+        // A gateway reference doubles as an idempotency key: the unique
+        // {businessId, externalSource, externalId} index rejects a second
+        // transaction for the same provider payment (see models/Transaction.ts).
+        ...(params.reference ? { externalSource: params.method || 'gateway', externalId: params.reference } : {}),
+      },
+    ],
+    { session },
+  );
 
   invoice.payments.push({
     amount,
     date: new Date(),
     method: params.method || 'manual',
-    transactionId: incomeTransaction._id as mongoose.Types.ObjectId,
+    transactionId: incomeTransaction!._id as mongoose.Types.ObjectId,
     ...(params.note ? { note: params.note } : {}),
+    ...(params.reference ? { reference: params.reference } : {}),
   });
   invoice.status = willFullyPay ? 'paid' : 'partial';
   if (willFullyPay && !invoice.transactionId) {
-    invoice.transactionId = incomeTransaction._id as mongoose.Types.ObjectId;
+    invoice.transactionId = incomeTransaction!._id as mongoose.Types.ObjectId;
   }
 
-  return { willFullyPay, transaction: incomeTransaction };
+  return { willFullyPay, amount, transaction: incomeTransaction! };
 };
 
 // Records money actually received against an invoice — creates a transaction for
 // exactly that amount (not the invoice's face value), logs it in invoice.payments,
 // and moves status to 'partial' or 'paid' depending on what's left owing. This is
 // the one place that touches the invoice/transaction/payments trio, so every
-// payment channel (manual entry, the old "mark as paid" toggle, Paystack) goes
-// through it and the ledger always sums to what actually came in.
+// payment channel (manual entry, the "mark as paid" toggle, the Paystack webhook)
+// goes through it and the ledger always sums to what actually came in.
 export const recordPaymentForInvoice = async (
   id: string,
   user: IUser,
   params: { amount: number; method?: string; note?: string },
 ) => {
-  const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
-  if (!invoice) throw new AppError('Invoice not found', 404);
-  if (invoice.status === 'paid') throw new AppError('Invoice is already fully paid', 400);
-  if (invoice.status === 'void') throw new AppError('This invoice has been voided and can no longer be changed', 400);
+  let willFullyPay = false;
+  let amount = 0;
 
-  const amount = Number(params.amount);
-  const { willFullyPay } = await applyPaymentToInvoice(invoice, user.businessId, user._id as mongoose.Types.ObjectId, params);
+  // Read, validate and write inside one transaction: two concurrent payments
+  // can't both pass the balance check — the loser hits a write conflict, is
+  // re-run by withTransaction, and then sees the updated balance.
+  const updatedInvoice = await runInTransaction(async (session) => {
+    const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId }).session(session);
+    if (!invoice) throw new AppError('Invoice not found', 404);
+    if (invoice.status === 'paid') throw new AppError('Invoice is already fully paid', 400);
+    if (invoice.status === 'void') throw new AppError('This invoice has been voided and can no longer be changed', 400);
 
-  const updatedInvoice = await invoice.save();
+    ({ willFullyPay, amount } = await applyPaymentToInvoice(
+      invoice,
+      user.businessId,
+      user._id as mongoose.Types.ObjectId,
+      params,
+      session,
+    ));
+    return invoice.save({ session });
+  });
 
   await createNotification({
     businessId: user.businessId,
@@ -257,28 +297,33 @@ export const recordPaymentForInvoice = async (
 // to avoid the mess of recalculating everything after a payment buried
 // earlier in the log.
 export const undoLastPaymentForInvoice = async (id: string, user: IUser) => {
-  const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId });
-  if (!invoice) throw new AppError('Invoice not found', 404);
-  if (invoice.payments.length === 0) throw new AppError('This invoice has no recorded payments to undo', 400);
+  let lastPayment: IInvoice['payments'][number] | undefined;
 
-  const lastPayment = invoice.payments[invoice.payments.length - 1]!;
-  invoice.payments.pop();
+  // Deleting the transaction and popping the payment happen atomically, so the
+  // ledger and the invoice can't disagree if the process dies in between.
+  const updatedInvoice = await runInTransaction(async (session) => {
+    const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId }).session(session);
+    if (!invoice) throw new AppError('Invoice not found', 404);
+    if (invoice.payments.length === 0) throw new AppError('This invoice has no recorded payments to undo', 400);
 
-  if (lastPayment.transactionId) {
-    await Transaction.findByIdAndDelete(lastPayment.transactionId);
-    if (invoice.transactionId && String(invoice.transactionId) === String(lastPayment.transactionId)) {
-      invoice.transactionId = undefined;
+    lastPayment = invoice.payments[invoice.payments.length - 1]!;
+    invoice.payments.pop();
+
+    if (lastPayment.transactionId) {
+      await Transaction.findOneAndDelete({ _id: lastPayment.transactionId, businessId: user.businessId }, { session });
+      if (invoice.transactionId && String(invoice.transactionId) === String(lastPayment.transactionId)) {
+        invoice.transactionId = undefined;
+      }
     }
-  }
 
-  invoice.status = invoice.payments.length > 0 ? 'partial' : 'sent';
-
-  const updatedInvoice = await invoice.save();
+    invoice.status = invoice.payments.length > 0 ? 'partial' : 'sent';
+    return invoice.save({ session });
+  });
 
   await createNotification({
     businessId: user.businessId,
     userId: user._id as mongoose.Types.ObjectId,
-    message: `Removed a payment of ${lastPayment.amount} from Invoice #${updatedInvoice.invoiceNumber}.`,
+    message: `Removed a payment of ${lastPayment!.amount} from Invoice #${updatedInvoice.invoiceNumber}.`,
     link: `/invoices/${updatedInvoice._id}`,
   });
 
@@ -454,9 +499,10 @@ export const getInvoiceWhatsAppLink = async (id: string, user: IUser, phone: str
 };
 
 export const initPaystackPaymentForInvoice = async (id: string, email: string) => {
-  const invoice = await Invoice.findById(id).populate('businessId', 'currency');
+  const invoice = await Invoice.findById(id);
   if (!invoice) throw new AppError('Invoice not found', 404);
   if (invoice.status === 'paid') throw new AppError('Invoice is already paid', 400);
+  if (invoice.status === 'void') throw new AppError('This invoice has been voided', 400);
 
   const paystackKey = process.env.PAYSTACK_SECRET_KEY;
   if (!paystackKey) throw new AppError('Payment not configured on this server', 503);
@@ -464,14 +510,16 @@ export const initPaystackPaymentForInvoice = async (id: string, email: string) =
   // Charge whatever's actually left owing, not the invoice's face value — matters
   // once part of it has already been paid manually (e.g. a bank transfer logged
   // against the invoice before the client pays the rest online).
-  const amountKobo = Math.round(invoice.balance * 100);
+  const amountMinor = Math.round(invoice.balance * 100);
+
 
   try {
     const response = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
         email,
-        amount: amountKobo,
+        amount: amountMinor,
+        currency: PAYSTACK_CURRENCY,
         reference: `INV-${invoice._id}-${Date.now()}`,
         metadata: { invoice_id: String(invoice._id), invoice_number: invoice.invoiceNumber },
         callback_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/invoice/${invoice._id}?paid=true`,
@@ -491,75 +539,173 @@ export const initPaystackPaymentForInvoice = async (id: string, email: string) =
   }
 };
 
-export const handlePaystackWebhook = async (rawBody: unknown, signature: unknown) => {
+// Amounts are stored in the app's base currency (NGN — CurrencyContext converts
+// from it for display), so online payments are always charged in NGN. Sent
+// explicitly rather than relying on the Paystack account default, and checked
+// again on the webhook.
+const PAYSTACK_CURRENCY = 'NGN';
+
+// Constant-time comparison so the signature check doesn't leak how many
+// leading characters matched.
+const signaturesMatch = (expected: string, received: unknown): boolean => {
+  if (typeof received !== 'string' || received.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+};
+
+interface PaystackChargeEvent {
+  event?: string;
+  data?: {
+    reference?: string;
+    status?: string;
+    amount?: number; // minor units (kobo / cents)
+    currency?: string;
+    metadata?: { invoice_id?: string };
+  };
+}
+
+export type PaystackWebhookResult = 'processed' | 'duplicate' | 'ignored';
+
+/**
+ * Handles a Paystack webhook. Safe to receive the same event any number of
+ * times, concurrently or not — Paystack delivers "at least once".
+ *
+ * 1. Verify HMAC-SHA512 over the RAW body bytes (not re-serialised JSON — the
+ *    body sanitiser used to alter the parsed body, breaking valid signatures).
+ * 2. Ignore anything but a successful charge for an invoice we know.
+ * 3. Record the amount Paystack actually charged — not the invoice balance —
+ *    through the same applyPaymentToInvoice path as manual payments.
+ * 4. Idempotency: the Paystack reference is stored on the payment and as the
+ *    income transaction's externalId (unique index). A duplicate delivery either
+ *    sees the reference already recorded, or loses the race on the unique index.
+ */
+export const handlePaystackWebhook = async (
+  rawBody: Buffer | undefined,
+  signature: unknown,
+): Promise<PaystackWebhookResult> => {
   const paystackKey = process.env.PAYSTACK_SECRET_KEY;
-  if (!paystackKey) return;
+  if (!paystackKey) throw new AppError('Payment not configured on this server', 503);
+  if (!rawBody) throw new AppError('Missing body', 400);
 
-  const hash = crypto.createHmac('sha512', paystackKey).update(JSON.stringify(rawBody)).digest('hex');
-  if (hash !== signature) throw new AppError('Invalid signature', 401);
+  const expected = crypto.createHmac('sha512', paystackKey).update(rawBody).digest('hex');
+  if (!signaturesMatch(expected, signature)) throw new AppError('Invalid signature', 401);
 
-  const event = rawBody as { event?: string; data?: { metadata?: { invoice_id?: string } } };
-  if (event.event !== 'charge.success') return;
-
-  const invoiceId = event.data?.metadata?.invoice_id;
-  if (!invoiceId) return;
-
-  const invoice = await Invoice.findById(invoiceId);
-  if (!invoice || invoice.status === 'paid') return;
-
-  const amountCharged = invoice.balance;
-  invoice.status = 'paid';
-
-  if (!invoice.transactionId) {
-    const tx = await Transaction.create({
-      clientId: invoice.clientId || null,
-      businessId: invoice.businessId,
-      amount: amountCharged,
-      type: 'income',
-      category: 'Sales',
-      description: `Paystack payment for Invoice #${invoice.invoiceNumber}`,
-      source: 'manual',
-    });
-    invoice.transactionId = tx._id as mongoose.Types.ObjectId;
-    invoice.payments.push({
-      amount: amountCharged,
-      date: new Date(),
-      method: 'paystack',
-      transactionId: tx._id as mongoose.Types.ObjectId,
-    });
+  let event: PaystackChargeEvent;
+  try {
+    event = JSON.parse(rawBody.toString('utf8')) as PaystackChargeEvent;
+  } catch {
+    throw new AppError('Malformed payload', 400);
   }
 
-  await invoice.save();
+  const data = event.data;
+  if (event.event !== 'charge.success' || data?.status !== 'success') return 'ignored';
+  const invoiceId = data.metadata?.invoice_id;
+  const reference = data.reference;
+  if (!invoiceId || !reference || !mongoose.isValidObjectId(invoiceId)) return 'ignored';
 
-  const owningBusiness = await Business.findById(invoice.businessId).select('owner');
-  if (owningBusiness?.owner) {
-    await createNotification({
-      businessId: invoice.businessId,
-      userId: owningBusiness.owner,
-      message: `Invoice #${invoice.invoiceNumber} fully paid via Paystack — ${amountCharged} received.`,
-      link: `/invoices/${invoice._id}`,
+  // Assigned inside the transaction callback, so widen it explicitly.
+  let outcome = 'ignored' as PaystackWebhookResult;
+  let recordedAmount = 0;
+  let willFullyPay = false;
+
+  try {
+    await runInTransaction(async (session) => {
+      outcome = 'ignored';
+      const invoice = await Invoice.findById(invoiceId).session(session);
+      if (!invoice || invoice.status === 'void') return;
+
+      if (invoice.payments.some((p) => p.reference === reference)) {
+        outcome = 'duplicate';
+        return;
+      }
+
+      if (data.currency && data.currency.toUpperCase() !== PAYSTACK_CURRENCY) {
+        console.error(`[Paystack] Currency mismatch on ${reference}: got ${data.currency}, expected ${PAYSTACK_CURRENCY}`);
+        return;
+      }
+      const business = await Business.findById(invoice.businessId).select('owner').session(session);
+
+      const charged = Math.round(Number(data.amount || 0)) / 100;
+      if (charged <= 0) return;
+
+      // Money arrived even if the invoice was settled some other way in the
+      // meantime; record what fits and flag any excess for the owner.
+      const balance = invoice.balance;
+      if (balance <= 0) {
+        console.error(`[Paystack] ${reference}: ${charged} received for already-settled invoice ${invoice.invoiceNumber}`);
+        return;
+      }
+      const amount = Math.min(charged, balance);
+      const overpaid = roundMoney(charged - amount);
+
+      // Transactions require a recorder — attribute gateway payments to the owner
+      // (or any admin if the business has no owner recorded).
+      const recorder =
+        business?.owner ??
+        ((await User.findOne({ businessId: invoice.businessId, role: 'admin' }).select('_id').session(session))
+          ?._id as mongoose.Types.ObjectId | undefined);
+
+      ({ willFullyPay, amount: recordedAmount } = await applyPaymentToInvoice(
+        invoice,
+        invoice.businessId,
+        recorder,
+        {
+          amount,
+          method: 'paystack',
+          reference,
+          ...(overpaid > 0 ? { note: `Overpaid by ${overpaid} via Paystack — refund or credit the client` } : {}),
+        },
+        session,
+      ));
+      await invoice.save({ session });
+      outcome = 'processed';
     });
+  } catch (e) {
+    // A concurrent delivery of the same event won the race on the unique
+    // {businessId, externalSource, externalId} index — already recorded.
+    if (isDuplicateKeyError(e)) return 'duplicate';
+    throw e;
   }
 
-  emitToBusiness(String(invoice.businessId), 'data_updated', { type: 'invoice', action: 'paid' });
+  if (outcome !== 'processed') return outcome;
 
+  // Side effects only after the commit, so a retried transaction can't notify twice.
   const populated = await Invoice.findById(invoiceId)
-    .populate<{ businessId: { name: string; currency: string } | null }>('businessId', 'name currency')
+    .populate<{ businessId: { _id: mongoose.Types.ObjectId; name: string; currency: string; owner?: mongoose.Types.ObjectId } | null }>(
+      'businessId',
+      'name currency owner',
+    )
     .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email');
   const biz = populated?.businessId;
-  const client = populated?.clientId;
-  const recipientEmail = client?.email || invoice.recipientEmail;
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-  if (recipientEmail && biz) {
+  if (!populated || !biz) return outcome;
+
+  if (biz.owner) {
+    await createNotification({
+      businessId: biz._id,
+      userId: biz.owner,
+      message: willFullyPay
+        ? `Invoice #${populated.invoiceNumber} fully paid via Paystack — ${recordedAmount} received.`
+        : `${recordedAmount} received via Paystack on Invoice #${populated.invoiceNumber} — ${populated.balance} still owing.`,
+      link: `/invoices/${populated._id}`,
+    });
+  }
+
+  emitToBusiness(String(biz._id), 'data_updated', { type: 'invoice', action: 'paid' });
+
+  const client = populated.clientId;
+  const recipientEmail = client?.email || populated.recipientEmail;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  if (recipientEmail && willFullyPay) {
     sendReceiptEmail({
       recipientEmail,
       clientName: client?.name || 'Valued Client',
       businessName: biz.name,
-      invoiceNumber: invoice.invoiceNumber,
-      total: invoice.total,
+      invoiceNumber: populated.invoiceNumber,
+      total: populated.total,
       currency: biz.currency || 'NGN',
       paidAt: new Date().toISOString(),
-      publicLink: `${frontendUrl}/invoice/${invoice._id}`,
+      publicLink: `${frontendUrl}/invoice/${populated._id}`,
     }).catch(() => {});
   }
+
+  return outcome;
 };

@@ -2,14 +2,20 @@ import { Server as SocketIOServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import User from '../models/User.js';
+import { isAllowedOrigin } from '../config/origins.js';
 
 let io: SocketIOServer | null = null;
 
 export const initSocketServer = (server: HTTPServer) => {
   io = new SocketIOServer(server, {
     cors: {
-      origin: '*', // Adjust this in production
-      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      // Same allowlist as the HTTP API (config/origins.ts).
+      origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) return callback(null, true);
+        callback(new Error(`Socket CORS: origin ${origin} not allowed`));
+      },
+      methods: ['GET', 'POST'],
+      credentials: true,
     },
   });
 
@@ -20,8 +26,11 @@ export const initSocketServer = (server: HTTPServer) => {
       return next(new Error('Authentication error'));
     }
 
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return next(new Error('Authentication error'));
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as JwtPayload;
+      const decoded = jwt.verify(token, secret) as JwtPayload;
       // The JWT only carries { id } — look up businessId so the socket can join its room.
       const user = await User.findById(decoded.id).select('businessId');
       if (!user) {
