@@ -8,13 +8,17 @@ import * as activityService from '../services/activityService.js';
 // @access  Private/Admin
 export const getActivityLogs = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
-  const { page, limit, action, resource, userId } = req.query;
+  const { page, limit, action, resource, userId, q, severity, from, to } = req.query;
   const result = await activityService.getActivityLogsForBusiness(req.user.businessId, {
     page: page as string,
     limit: limit as string,
     action: action as string,
     resource: resource as string,
     userId: userId as string,
+    q: q as string,
+    severity: severity as string,
+    from: from as string,
+    to: to as string,
   });
   res.json(result);
 });
