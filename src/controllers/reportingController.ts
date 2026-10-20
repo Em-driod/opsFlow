@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as reportingService from '../services/reportingService.js';
+import * as profitService from '../services/profitService.js';
 
 /**
  * @desc    Generate a financial summary report
@@ -43,5 +44,37 @@ export const getDetailedTransactions = asyncHandler(async (req: Request, res: Re
 export const getMonthlyTrend = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   const result = await reportingService.getMonthlyTrendForBusiness(req.user.businessId, req.query.months as string);
+  res.json(result);
+});
+
+/**
+ * @desc    Profit per catalog product, with booked vs collected profit
+ * @route   GET /api/reporting/product-profit?from=&to=&source=all|invoices|receipts&method=proportional|cost_first&productId=
+ * @access  Private
+ */
+export const getProductProfit = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const { from, to, source, method, productId } = req.query;
+  const result = await profitService.getProductProfitForBusiness(req.user.businessId, {
+    from: from as string,
+    to: to as string,
+    source: source as string,
+    method: method as string,
+    productId: productId as string,
+  });
+  res.json(result);
+});
+
+/**
+ * @desc    Link past unlinked sale lines (by description) to a catalog product
+ * @route   POST /api/reporting/product-profit/link
+ * @access  Private
+ */
+export const linkSalesToProduct = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  const result = await profitService.linkSalesToProduct(req.user.businessId, {
+    description: req.body?.description,
+    productId: req.body?.productId,
+  });
   res.json(result);
 });

@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { snapshotUnitCosts } from '../utils/productCost.js';
 
 export interface IInvoicePayment {
   amount: number;
@@ -22,6 +23,8 @@ export interface IInvoice extends Document {
     unitPrice: number;
     total: number;
     productId?: mongoose.Types.ObjectId;
+    // Cost per unit at the time of sale (see utils/productCost.ts). select:false.
+    unitCost?: number;
   }[];
   subtotal: number;
   tax: number;
@@ -42,6 +45,9 @@ const LineItemSchema: Schema = new Schema({
   unitPrice: { type: Number, required: true },
   total: { type: Number, required: true },
   productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  // Hidden by default: invoices are shown to clients (public link, client
+  // portal), and they must never see what the item cost the business.
+  unitCost: { type: Number, min: 0, select: false },
 });
 
 const InvoicePaymentSchema: Schema = new Schema(
@@ -91,6 +97,14 @@ InvoiceSchema.virtual('balance').get(function (this: IInvoice) {
   const recorded = (this.payments || []).reduce((sum, p) => sum + p.amount, 0);
   const amountPaid = recorded > 0 ? recorded : this.status === 'paid' ? this.total : 0;
   return Math.max(0, this.total - amountPaid);
+});
+
+// Every creation path (manual, proposal conversion, recurring) goes through save,
+// so this is the one place sale-time costs are captured.
+InvoiceSchema.pre('save', async function () {
+  const invoice = this as unknown as IInvoice;
+  if (!invoice.isNew) return;
+  await snapshotUnitCosts(invoice.businessId, invoice.lineItems, invoice.$session());
 });
 
 export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);

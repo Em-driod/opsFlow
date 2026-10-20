@@ -1,10 +1,16 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { snapshotUnitCosts } from '../utils/productCost.js';
 
 export interface IReceiptItem {
   description: string;
   amount: number;
   productId?: mongoose.Types.ObjectId;
   quantity?: number;
+  // The transaction this line was built from, if any — lets the profit report
+  // skip lines that just re-state an invoice payment (already counted there).
+  transactionId?: mongoose.Types.ObjectId;
+  // Cost per unit at the time of sale (see utils/productCost.ts). select:false.
+  unitCost?: number;
 }
 
 export interface IReceipt extends Document {
@@ -31,6 +37,9 @@ const ReceiptItemSchema = new Schema<IReceiptItem>(
     amount: { type: Number, required: true },
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
     quantity: { type: Number },
+    transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+    // Hidden by default: receipts are public via their share link.
+    unitCost: { type: Number, min: 0, select: false },
   },
   { _id: false }
 );
@@ -56,5 +65,11 @@ const ReceiptSchema: Schema = new Schema(
 );
 
 ReceiptSchema.index({ businessId: 1, createdAt: -1 });
+
+ReceiptSchema.pre('save', async function () {
+  const receipt = this as unknown as IReceipt;
+  if (!receipt.isNew) return;
+  await snapshotUnitCosts(receipt.businessId, receipt.items, receipt.$session());
+});
 
 export default mongoose.model<IReceipt>('Receipt', ReceiptSchema);

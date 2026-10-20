@@ -11,6 +11,7 @@ import { sanitizeBody } from '../middleware/sanitize.js';
 import { jsonParser } from '../middleware/bodyParsers.js';
 import receiptRoutes from '../routes/receiptRoutes.js';
 import clientRoutes from '../routes/clientRoutes.js';
+import productRoutes from '../routes/productRoutes.js';
 
 export const createTestApp = () => {
   const app = express();
@@ -25,6 +26,7 @@ export const createTestApp = () => {
   app.use('/api/reporting', reportingRoutes);
   app.use('/api/receipts', receiptRoutes);
   app.use('/api/clients', clientRoutes);
+  app.use('/api/products', productRoutes);
 
   // Minimal routes for exercising the auth middleware directly.
   app.get('/api/test/protected', protect, (req: Request, res: Response) => {

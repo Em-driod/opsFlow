@@ -5,6 +5,7 @@ export interface IProduct extends Document {
   name: string;
   description?: string;
   price: number;
+  costPrice?: number | null;
   unit?: string;
   category?: string;
   image?: string;
@@ -20,6 +21,10 @@ const ProductSchema: Schema = new Schema(
     name: { type: String, required: true },
     description: { type: String },
     price: { type: Number, required: true, default: 0 },
+    // What one unit costs the business. Hidden by default so it can never reach
+    // the public profile/storefront — owner-facing queries opt in with +costPrice.
+    // null = not set yet (distinct from a genuine zero-cost item).
+    costPrice: { type: Number, min: 0, default: null, select: false },
     unit: { type: String, default: 'unit' },
     category: { type: String },
     image: { type: String },
