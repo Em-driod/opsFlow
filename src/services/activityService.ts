@@ -27,12 +27,20 @@ export const getActivityLogsForBusiness = async (
   if (params.resource) query.resource = params.resource;
   if (params.userId && mongoose.Types.ObjectId.isValid(params.userId)) query.user = params.userId;
 
-  if (params.from || params.to) {
-    const range: Record<string, Date> = {};
-    if (params.from) range.$gte = new Date(`${params.from}T00:00:00.000Z`);
-    if (params.to) range.$lte = new Date(`${params.to}T23:59:59.999Z`);
-    query.createdAt = range;
-  }
+  // Accepts full ISO timestamps (the app sends the user's local day boundaries)
+  // or plain YYYY-MM-DD dates (treated as whole UTC days). Invalid values are ignored.
+  const boundary = (value: string, edge: 'start' | 'end') => {
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T${edge === 'start' ? '00:00:00.000' : '23:59:59.999'}Z`)
+      : new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const range: Record<string, Date> = {};
+  const fromDate = params.from ? boundary(params.from, 'start') : null;
+  const toDate = params.to ? boundary(params.to, 'end') : null;
+  if (fromDate) range.$gte = fromDate;
+  if (toDate) range.$lte = toDate;
+  if (Object.keys(range).length) query.createdAt = range;
 
   if (params.q) {
     const rx = new RegExp(escapeRegex(params.q), 'i');
