@@ -6,6 +6,7 @@ import Business from '../models/Business.js';
 import Product from '../models/Product.js';
 import { sendIssuedReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { logoUrlForEmail } from '../utils/branding.js';
 
 // Reduces stock for any catalog items in the receipt. trackStock items are allowed
 // to go negative on purpose — the UI surfaces negative stock for the owner to correct
@@ -86,7 +87,7 @@ export const sendReceiptByEmailForBusiness = async (
   const email = emailOverride || receipt.payerEmail;
   if (!email) throw new AppError('No email address provided', 400);
 
-  const business = await Business.findById(businessId).select('name currency').lean();
+  const business = await Business.findById(businessId).select('name currency profile.logoImage updatedAt').lean();
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
   const publicLink = `${frontendUrl}/receipt/${receipt.publicToken}`;
 
@@ -100,6 +101,7 @@ export const sendReceiptByEmailForBusiness = async (
     description: receipt.description,
     date: receipt.date.toISOString(),
     publicLink,
+    logoUrl: logoUrlForEmail(business),
   }).catch(() => false);
 
   return { emailSent: sent, publicLink };
@@ -109,7 +111,22 @@ export const getPublicReceiptByToken = async (token: string) => {
   const receipt = await Receipt.findOne({ publicToken: token }).lean();
   if (!receipt) throw new AppError('Receipt not found', 404);
 
-  const business = await Business.findById(receipt.businessId).select('name email phone address logo').lean();
+  const business = await Business.findById(receipt.businessId)
+    .select('name currency profile.logoImage profile.accentColor profile.email profile.whatsapp profile.location')
+    .lean();
 
-  return { receipt, business };
+  return {
+    receipt,
+    business: business
+      ? {
+          name: business.name,
+          currency: business.currency,
+          logoImage: business.profile?.logoImage || null,
+          accentColor: business.profile?.accentColor || null,
+          email: business.profile?.email || null,
+          phone: business.profile?.whatsapp || null,
+          address: business.profile?.location || null,
+        }
+      : null,
+  };
 };

@@ -12,6 +12,7 @@ import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { sendInvoiceEmail, sendReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { logoUrlForEmail } from '../utils/branding.js';
 import { escapeRegex } from '../utils/regex.js';
 import { runInTransaction, isDuplicateKeyError } from '../utils/transaction.js';
 import { extractDocumentText } from '../utils/documentExtraction.js';
@@ -407,7 +408,7 @@ export const getPublicInvoiceById = async (id: string) => {
     .populate('clientId', 'name email')
     .populate(
       'businessId',
-      'name currency profile.bankName profile.accountNumber profile.accountName profile.bankName2 profile.accountNumber2 profile.accountName2',
+      'name currency profile.logoImage profile.accentColor profile.email profile.whatsapp profile.location profile.bankName profile.accountNumber profile.accountName profile.bankName2 profile.accountNumber2 profile.accountName2',
     );
   if (!invoice) throw new AppError('Invoice not found', 404);
   return invoice;
@@ -442,6 +443,7 @@ export const sendInvoiceByEmail = async (id: string, user: IUser, email: string)
     tax: invoice.tax,
     notes: invoice.notes,
     publicLink,
+    logoUrl: logoUrlForEmail(business),
   });
 
   invoice.recipientEmail = email;
@@ -670,9 +672,18 @@ export const handlePaystackWebhook = async (
 
   // Side effects only after the commit, so a retried transaction can't notify twice.
   const populated = await Invoice.findById(invoiceId)
-    .populate<{ businessId: { _id: mongoose.Types.ObjectId; name: string; currency: string; owner?: mongoose.Types.ObjectId } | null }>(
+    .populate<{
+      businessId: {
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        currency: string;
+        owner?: mongoose.Types.ObjectId;
+        updatedAt?: Date;
+        profile?: { logoImage?: string };
+      } | null;
+    }>(
       'businessId',
-      'name currency owner',
+      'name currency owner profile.logoImage updatedAt',
     )
     .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email');
   const biz = populated?.businessId;
@@ -704,6 +715,7 @@ export const handlePaystackWebhook = async (
       currency: biz.currency || 'NGN',
       paidAt: new Date().toISOString(),
       publicLink: `${frontendUrl}/invoice/${populated._id}`,
+      logoUrl: logoUrlForEmail(biz),
     }).catch(() => {});
   }
 

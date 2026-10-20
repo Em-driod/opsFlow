@@ -1,3 +1,4 @@
+import { emailLogoHtml } from '../utils/branding.js';
 const esc = (str: string | undefined | null): string =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -62,6 +63,7 @@ interface InvoiceEmailData {
   tax: number;
   notes?: string | undefined;
   publicLink: string;
+  logoUrl?: string | undefined;
 }
 
 export const sendReminderEmail = async (data: {
@@ -144,6 +146,7 @@ export const sendReceiptEmail = async (data: {
   currency: string;
   paidAt: string;
   publicLink: string;
+  logoUrl?: string | undefined;
 }): Promise<boolean> => {
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
@@ -157,6 +160,7 @@ export const sendReceiptEmail = async (data: {
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 16px;"><tr><td align="center">
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
     <tr><td style="background:#10b981;padding:32px 40px;">
+      ${emailLogoHtml(data.logoUrl, data.businessName)}
       <h1 style="margin:0;font-size:22px;font-weight:900;color:#fff;">Payment Received</h1>
       <p style="margin:6px 0 0;font-size:14px;color:rgba(255,255,255,0.8);">From ${sBusinessName}</p>
     </td></tr>
@@ -203,6 +207,7 @@ export const sendProposalEmail = async (data: {
   tax: number;
   notes?: string;
   publicLink: string;
+  logoUrl?: string | undefined;
 }): Promise<boolean> => {
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
@@ -229,7 +234,7 @@ export const sendProposalEmail = async (data: {
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
     <tr><td style="background:linear-gradient(135deg,#0f172a,#1e293b);padding:40px 40px 32px;">
       <table width="100%"><tr>
-        <td><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.5);">Proposal from</p>
+        <td>${emailLogoHtml(data.logoUrl, data.businessName)}<p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.5);">Proposal from</p>
           <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${sBusinessName}</h1></td>
         <td align="right"><div style="background:rgba(255,255,255,0.1);border-radius:12px;padding:12px 20px;">
           <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Proposal</p>
@@ -328,6 +333,7 @@ export const sendInvoiceEmail = async (data: InvoiceEmailData): Promise<boolean>
             <table width="100%">
               <tr>
                 <td>
+                  ${emailLogoHtml(data.logoUrl, data.businessName)}
                   <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Invoice from</p>
                   <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${sBusinessName}</h1>
                 </td>
@@ -435,6 +441,7 @@ export const sendIssuedReceiptEmail = async (data: {
   description: string;
   date: string;
   publicLink: string;
+  logoUrl?: string | undefined;
 }): Promise<boolean> => {
   const formattedAmount = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
@@ -451,7 +458,7 @@ export const sendIssuedReceiptEmail = async (data: {
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
     <tr><td style="background:linear-gradient(135deg,#059669,#10b981);padding:40px 40px 32px;">
       <table width="100%"><tr>
-        <td><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Receipt from</p>
+        <td>${emailLogoHtml(data.logoUrl, data.businessName)}<p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Receipt from</p>
           <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${sBusinessName}</h1></td>
         <td align="right"><div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:12px 20px;display:inline-block;">
           <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Receipt No.</p>

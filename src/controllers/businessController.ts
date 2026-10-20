@@ -18,8 +18,33 @@ export const createBusiness = asyncHandler(async (req: Request, res: Response) =
 // @access  Private (own business only)
 export const getBusinessById = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
-  const business = await businessService.getBusinessById(req.params.id!, req.user.businessId);
+  // "me" is shorthand for the caller's own business.
+  const id = req.params.id === 'me' ? String(req.user.businessId) : req.params.id!;
+  const business = await businessService.getBusinessById(id, req.user.businessId);
   res.json(business);
+});
+
+// @desc    Name, logo and colour for branding the app and documents
+// @route   GET /api/businesses/me/branding
+// @access  Private
+export const getMyBranding = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  res.json(await businessService.getBrandingForBusiness(req.user.businessId));
+});
+
+// @desc    The business logo as an image (used by emails)
+// @route   GET /api/businesses/:id/logo
+// @access  Public
+export const getBusinessLogo = asyncHandler(async (req: Request, res: Response) => {
+  const logo = await businessService.getLogoForBusiness(req.params.id!);
+  if ('redirect' in logo) {
+    res.redirect(302, logo.redirect);
+    return;
+  }
+  res.set('Content-Type', logo.mime);
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.send(logo.buffer);
 });
 
 // @desc    Update business

@@ -7,6 +7,7 @@ import Business from '../models/Business.js';
 import { createNotification } from './notificationService.js';
 import { sendProposalEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { logoUrlForEmail } from '../utils/branding.js';
 import { generateInvoiceNumber } from './invoiceService.js';
 
 const getNextProposalNumber = async (businessId: string): Promise<string> => {
@@ -85,7 +86,7 @@ export const sendProposalForBusiness = async (id: string, businessId: mongoose.T
   const recipientEmail = proposal.clientId?.email || proposal.recipientEmail;
   let emailSent = false;
   if (recipientEmail) {
-    const business = await Business.findById(businessId).select('name currency').lean();
+    const business = await Business.findById(businessId).select('name currency profile.logoImage updatedAt').lean();
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
     emailSent = await sendProposalEmail({
       recipientEmail,
@@ -106,6 +107,7 @@ export const sendProposalForBusiness = async (id: string, businessId: mongoose.T
       tax: proposal.tax,
       ...(proposal.notes ? { notes: proposal.notes } : {}),
       publicLink: `${frontendUrl}/proposal/${proposal._id}`,
+      logoUrl: logoUrlForEmail(business),
     }).catch(() => false);
   }
 

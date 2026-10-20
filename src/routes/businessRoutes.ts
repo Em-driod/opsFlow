@@ -8,10 +8,14 @@ import {
   addUserToBusiness,
   updateBusinessProfile,
   getPublicProfile,
+  getMyBranding,
+  getBusinessLogo,
 } from '../controllers/businessController.js';
 import { protect, admin } from '../middleware/auth.js';
 
 router.route('/').post(protect, createBusiness);
+router.get('/me/branding', protect, getMyBranding);
+router.get('/:id/logo', getBusinessLogo); // public — emails load the logo from here
 router
   .route('/:id')
   .get(protect, getBusinessById)
