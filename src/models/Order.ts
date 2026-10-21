@@ -3,6 +3,17 @@ import mongoose, { Schema, Document } from 'mongoose';
 export type OrderStatus = 'pending_payment' | 'paid' | 'fulfilled' | 'cancelled';
 export type PaymentSource = 'manual' | 'email_alert' | 'mono';
 
+// Where the order is after payment, as the customer sees it.
+//   placed → paid → preparing → ready (pickup) | out_for_delivery (delivery) → completed
+export type OrderStage = 'placed' | 'paid' | 'preparing' | 'ready' | 'out_for_delivery' | 'completed' | 'cancelled';
+export const ORDER_STAGES: OrderStage[] = ['placed', 'paid', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled'];
+
+export interface IOrderProgress {
+  stage: OrderStage;
+  at: Date;
+  note?: string;
+}
+
 export interface IOrderItem {
   productId: mongoose.Types.ObjectId;
   name: string;
@@ -31,6 +42,8 @@ export interface IOrder extends Document {
   deliveryMethod: 'pickup' | 'delivery';
   note?: string;
   status: OrderStatus;
+  // Step-by-step history shown on the customer's order page; last entry is current.
+  progress: IOrderProgress[];
   // When the customer tapped "I've sent the money" — a nudge, not proof.
   customerMarkedPaidAt?: Date;
   paidAt?: Date;
@@ -60,6 +73,15 @@ const OrderItemSchema = new Schema<IOrderItem>(
   { _id: false },
 );
 
+const OrderProgressSchema = new Schema<IOrderProgress>(
+  {
+    stage: { type: String, enum: ORDER_STAGES, required: true },
+    at: { type: Date, required: true, default: Date.now },
+    note: { type: String, trim: true, maxlength: 300 },
+  },
+  { _id: false },
+);
+
 const OrderSchema = new Schema<IOrder>(
   {
     businessId: { type: Schema.Types.ObjectId, ref: 'Business', required: true },
@@ -82,6 +104,7 @@ const OrderSchema = new Schema<IOrder>(
       enum: ['pending_payment', 'paid', 'fulfilled', 'cancelled'],
       default: 'pending_payment',
     },
+    progress: { type: [OrderProgressSchema], default: () => [{ stage: 'placed', at: new Date() }] },
     customerMarkedPaidAt: { type: Date },
     paidAt: { type: Date },
     paidAmount: { type: Number },

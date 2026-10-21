@@ -7,6 +7,8 @@ import {
   getOrder,
   confirmPayment,
   updateStatus,
+  advanceStage,
+  undoStage,
 } from '../controllers/orderController.js';
 import { protect, admin } from '../middleware/auth.js';
 
@@ -22,5 +24,7 @@ router.get('/', protect, listOrders);
 router.get('/:id', protect, getOrder);
 router.post('/:id/confirm-payment', protect, admin, confirmPayment);
 router.put('/:id/status', protect, updateStatus);
+router.put('/:id/stage', protect, advanceStage);
+router.post('/:id/stage/undo', protect, undoStage);
 
 export default router;

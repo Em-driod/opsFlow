@@ -302,3 +302,59 @@ describe('order management', () => {
     expect((await request(app).post(`/api/orders/${order!._id}/confirm-payment`).set(auth(b.token))).status).toBe(404);
   });
 });
+
+describe('order progress', () => {
+  const paidOrder = async (deliveryMethod: 'pickup' | 'delivery' = 'pickup') => {
+    const shop = await makeShop('A');
+    const placed = await placeOrder(shop.business.slug!, {
+      deliveryMethod,
+      ...(deliveryMethod === 'delivery' ? { address: '12 Allen Avenue, Ikeja' } : {}),
+      items: [{ productId: String(shop.rice._id), quantity: 1 }],
+    });
+    const order = await Order.findOne({ code: placed.body.code });
+    await request(app).post(`/api/orders/${order!._id}/confirm-payment`).set(auth(shop.token));
+    return { ...shop, order: order!, token: shop.token, publicToken: placed.body.token as string };
+  };
+  const stage = (token: string, id: unknown, body: Record<string, unknown>) =>
+    request(app).put(`/api/orders/${id}/stage`).set(auth(token)).send(body);
+
+  it('records placed and paid automatically and offers the right next steps', async () => {
+    const { token, order } = await paidOrder('pickup');
+    const res = await request(app).get(`/api/orders/${order._id}`).set(auth(token));
+    expect(res.body.progress.map((p: { stage: string }) => p.stage)).toEqual(['placed', 'paid']);
+    expect(res.body.nextStages).toEqual(['preparing', 'ready', 'completed']);
+  });
+
+  it('walks a pickup order to completion and shows each step to the customer', async () => {
+    const { token, order, publicToken } = await paidOrder('pickup');
+    expect((await stage(token, order._id, { stage: 'preparing' })).status).toBe(200);
+    const ready = await stage(token, order._id, { stage: 'ready', note: 'Ask for Bisi at the counter' });
+    expect(ready.body.stage).toBe('ready');
+
+    const tracked = await request(app).get(`/api/orders/public/track/${publicToken}`);
+    expect(tracked.body.stage).toBe('ready');
+    expect(tracked.body.progress.at(-1)).toMatchObject({ stage: 'ready', note: 'Ask for Bisi at the counter' });
+
+    const done = await stage(token, order._id, { stage: 'completed' });
+    expect(done.body.status).toBe('fulfilled');
+  });
+
+  it('refuses the wrong step for the delivery method, going backwards, and steps before payment', async () => {
+    const { token, order, business, rice } = await paidOrder('delivery');
+    expect((await stage(token, order._id, { stage: 'ready' })).status).toBe(400);
+    await stage(token, order._id, { stage: 'out_for_delivery' });
+    expect((await stage(token, order._id, { stage: 'preparing' })).status).toBe(400);
+
+    const unpaid = await placeOrder(business.slug!, { items: [{ productId: String(rice._id), quantity: 1 }] });
+    const unpaidOrder = await Order.findOne({ code: unpaid.body.code });
+    expect((await stage(token, unpaidOrder!._id, { stage: 'preparing' })).status).toBe(400);
+  });
+
+  it('undoes the last step, reopening a completed order', async () => {
+    const { token, order } = await paidOrder('pickup');
+    await stage(token, order._id, { stage: 'completed' });
+    const res = await request(app).post(`/api/orders/${order._id}/stage/undo`).set(auth(token));
+    expect(res.body.status).toBe('paid');
+    expect(res.body.stage).toBe('paid');
+  });
+});

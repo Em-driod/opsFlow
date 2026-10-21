@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import Order, { type IOrder, type OrderStatus, type PaymentSource } from '../models/Order.js';
+import Order, { type IOrder, type OrderStage, type OrderStatus, type PaymentSource } from '../models/Order.js';
 import Business from '../models/Business.js';
 import Product from '../models/Product.js';
 import Transaction from '../models/Transaction.js';
@@ -8,7 +8,7 @@ import User from '../models/User.js';
 import { createReceiptForBusiness } from './receiptService.js';
 import { createNotification } from './notificationService.js';
 import { emitToBusiness } from './socketService.js';
-import { sendIssuedReceiptEmail } from './emailService.js';
+import { sendIssuedReceiptEmail, sendOrderUpdateEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
 import { isDuplicateKeyError } from '../utils/transaction.js';
 import { escapeRegex } from '../utils/regex.js';
@@ -164,6 +164,8 @@ const toPublicView = (
     paidAt: order.paidAt ?? null,
     customerMarkedPaidAt: order.customerMarkedPaidAt ?? null,
     receiptToken: receiptToken ?? null,
+    stage: currentStage(order),
+    progress: progressOf(order).map((p) => ({ stage: p.stage, at: p.at, ...(p.note ? { note: p.note } : {}) })),
     business: {
       name: business.name,
       slug: business.slug ?? null,
@@ -241,7 +243,15 @@ export const getOrder = async (id: string, businessId: mongoose.Types.ObjectId) 
   const receipt = order.receiptId
     ? await mongoose.model('Receipt').findById(order.receiptId).select('receiptNumber publicToken').lean<{ receiptNumber?: string; publicToken?: string }>()
     : null;
-  return { ...order, receipt };
+  return {
+    ...order,
+    receipt,
+    progress: progressOf(order as IOrder),
+    stage: currentStage(order as IOrder),
+    nextStages: order.status === 'paid'
+      ? stagesFor(order.deliveryMethod).filter((s) => STAGE_ORDER[s] > STAGE_ORDER[currentStage(order as IOrder)])
+      : [],
+  };
 };
 
 export const confirmPaymentByOwner = async (id: string, user: IUser) => {
@@ -263,23 +273,131 @@ export const updateOrderStatus = async (id: string, businessId: mongoose.Types.O
   if (!order) throw new AppError('Order not found', 404);
 
   if (status === 'fulfilled') {
-    if (order.status !== 'paid') throw new AppError('Only paid orders can be marked as fulfilled', 400);
-    order.status = 'fulfilled';
-    order.fulfilledAt = new Date();
+    return advanceOrderStage(id, businessId, { stage: 'completed' });
+  } else if (status === 'paid' && order.status === 'fulfilled') {
+    return undoOrderStage(id, businessId);
   } else if (status === 'cancelled') {
     if (order.status !== 'pending_payment') {
       throw new AppError('Paid orders can’t be cancelled here — refund the customer and delete the receipt instead', 400);
     }
     order.status = 'cancelled';
     order.cancelledAt = new Date();
-  } else if (status === 'paid' && order.status === 'fulfilled') {
-    // Undo an accidental "fulfilled".
-    order.status = 'paid';
-    order.set('fulfilledAt', undefined);
+    order.progress = [...progressOf(order), { stage: 'cancelled', at: order.cancelledAt }];
   } else {
     throw new AppError('Unsupported status change', 400);
   }
 
+  await order.save();
+  emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'updated' });
+  return getOrder(id, businessId);
+};
+
+// ── Progress (what the customer sees after paying) ───────────────────────────
+
+const STAGE_ORDER: Record<OrderStage, number> = {
+  placed: 0, paid: 1, preparing: 2, ready: 3, out_for_delivery: 3, completed: 4, cancelled: 5,
+};
+
+// Orders saved before progress tracking existed have no history; rebuild a
+// sensible one from their status so they still display properly.
+const progressOf = (order: Pick<IOrder, 'progress' | 'status' | 'createdAt' | 'paidAt' | 'fulfilledAt' | 'cancelledAt'>) => {
+  if (order.progress?.length) {
+    return order.progress[0]!.stage === 'placed' ? order.progress : [{ stage: 'placed' as OrderStage, at: order.createdAt }, ...order.progress];
+  }
+  const out: { stage: OrderStage; at: Date; note?: string }[] = [{ stage: 'placed', at: order.createdAt }];
+  if (order.paidAt) out.push({ stage: 'paid', at: order.paidAt });
+  if (order.status === 'fulfilled') out.push({ stage: 'completed', at: order.fulfilledAt ?? order.paidAt ?? order.createdAt });
+  if (order.status === 'cancelled') out.push({ stage: 'cancelled', at: order.cancelledAt ?? order.createdAt });
+  return out;
+};
+
+const currentStage = (order: Parameters<typeof progressOf>[0]): OrderStage => progressOf(order).at(-1)!.stage;
+
+// Which steps make sense for this order: pickup orders get "ready", delivery
+// orders get "out for delivery".
+export const stagesFor = (deliveryMethod: 'pickup' | 'delivery'): OrderStage[] =>
+  deliveryMethod === 'delivery' ? ['preparing', 'out_for_delivery', 'completed'] : ['preparing', 'ready', 'completed'];
+
+const STAGE_COPY = (stage: OrderStage, pickup: boolean, business: string) =>
+  ({
+    preparing: { headline: 'Your order is being prepared', message: `${business} has started getting your order ready.` },
+    ready: { headline: 'Your order is ready for pickup', message: `Your order is ready. You can pick it up from ${business} now.` },
+    out_for_delivery: { headline: 'Your order is on its way', message: `Your order has left ${business} and is on its way to you.` },
+    completed: pickup
+      ? { headline: 'Order picked up — thank you!', message: `Thanks for shopping with ${business}. We hope to see you again.` }
+      : { headline: 'Order delivered — thank you!', message: `Your order has been delivered. Thanks for shopping with ${business}.` },
+  }) as Partial<Record<OrderStage, { headline: string; message: string }>>;
+
+export const advanceOrderStage = async (
+  id: string,
+  businessId: mongoose.Types.ObjectId,
+  params: { stage: unknown; note?: unknown; notify?: unknown },
+) => {
+  if (!mongoose.isValidObjectId(id)) throw new AppError('Order not found', 404);
+  const order = await Order.findOne({ _id: id, businessId });
+  if (!order) throw new AppError('Order not found', 404);
+  if (order.status !== 'paid') {
+    throw new AppError(order.status === 'fulfilled' ? 'This order is already complete' : 'Confirm payment before updating the order', 400);
+  }
+
+  const stage = String(params.stage) as OrderStage;
+  const allowed = stagesFor(order.deliveryMethod);
+  if (!allowed.includes(stage)) {
+    throw new AppError(order.deliveryMethod === 'delivery' ? 'Use “Out for delivery” for delivery orders' : 'Use “Ready for pickup” for pickup orders', 400);
+  }
+  const current = currentStage(order);
+  if (STAGE_ORDER[stage] <= STAGE_ORDER[current]) throw new AppError('This order is already past that step', 400);
+
+  const note = typeof params.note === 'string' ? params.note.trim().slice(0, 300) : '';
+  const at = new Date();
+  order.progress = [...progressOf(order), { stage, at, ...(note ? { note } : {}) }];
+  if (stage === 'completed') {
+    order.status = 'fulfilled';
+    order.fulfilledAt = at;
+  }
+  await order.save();
+  emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'updated' });
+
+  // Let the customer know, unless the owner chose not to.
+  if (order.customer.email && params.notify !== false) {
+    const business = await Business.findById(businessId).select('name profile.logoImage profile.accentColor updatedAt').lean();
+    const copy = STAGE_COPY(stage, order.deliveryMethod === 'pickup', business?.name || 'The business')[stage];
+    if (business && copy) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      sendOrderUpdateEmail({
+        recipientEmail: order.customer.email,
+        customerName: order.customer.name,
+        businessName: business.name,
+        orderCode: order.code,
+        headline: copy.headline,
+        message: copy.message,
+        note: note || undefined,
+        trackLink: `${frontendUrl}/order/${order.publicToken}`,
+        logoUrl: logoUrlForEmail(business as never),
+        accentColor: business.profile?.accentColor,
+      }).catch(() => {});
+    }
+  }
+
+  return getOrder(id, businessId);
+};
+
+// Steps back one stage after a mis-tap. Payment itself can't be undone here.
+export const undoOrderStage = async (id: string, businessId: mongoose.Types.ObjectId) => {
+  if (!mongoose.isValidObjectId(id)) throw new AppError('Order not found', 404);
+  const order = await Order.findOne({ _id: id, businessId });
+  if (!order) throw new AppError('Order not found', 404);
+  const progress = [...progressOf(order)];
+  const last = progress.at(-1)!;
+  if (!['preparing', 'ready', 'out_for_delivery', 'completed'].includes(last.stage)) {
+    throw new AppError('There’s no step to undo', 400);
+  }
+  progress.pop();
+  order.progress = progress;
+  if (last.stage === 'completed') {
+    order.status = 'paid';
+    order.set('fulfilledAt', undefined);
+  }
   await order.save();
   emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'updated' });
   return getOrder(id, businessId);
@@ -339,6 +457,7 @@ export const markOrderPaid = async (
         ...(opts.bankCreditId ? { bankCreditId: opts.bankCreditId } : {}),
         ...(opts.user ? { confirmedBy: opts.user._id } : {}),
       },
+      $push: { progress: { stage: 'paid', at: paidAt } },
     },
     { new: true },
   );

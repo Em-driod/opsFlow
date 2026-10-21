@@ -56,6 +56,18 @@ export const updateStatus = asyncHandler(async (req: Request, res: Response) => 
   res.json(await orderService.updateOrderStatus(req.params.id!, req.user.businessId, String(req.body?.status ?? '')));
 });
 
+// PUT /api/orders/:id/stage  { stage, note?, notify? }
+export const advanceStage = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  res.json(await orderService.advanceOrderStage(req.params.id!, req.user.businessId, req.body ?? {}));
+});
+
+// POST /api/orders/:id/stage/undo
+export const undoStage = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  res.json(await orderService.undoOrderStage(req.params.id!, req.user.businessId));
+});
+
 // ── Payment detection settings ───────────────────────────────────────────────
 
 // GET /api/payments/settings

@@ -510,6 +510,52 @@ export const sendIssuedReceiptEmail = async (data: {
   });
 };
 
+// "Your order is ready for pickup" — sent as the business moves an order along.
+export const sendOrderUpdateEmail = async (data: {
+  recipientEmail: string;
+  customerName: string;
+  businessName: string;
+  orderCode: string;
+  headline: string;
+  message: string;
+  note?: string | undefined;
+  trackLink: string;
+  logoUrl?: string | undefined;
+  accentColor?: string | undefined;
+}): Promise<boolean> => {
+  const brand = emailBrandColor(data.accentColor, '#4f46e5');
+  const sBusiness = esc(data.businessName);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;"><tr><td align="center">
+  <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+    <tr><td style="background:${brand};padding:36px 40px 30px;">
+      ${emailLogoHtml(data.logoUrl, data.businessName)}
+      <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Order ${esc(data.orderCode)} · ${sBusiness}</p>
+      <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${esc(data.headline)}</h1>
+    </td></tr>
+    <tr><td style="padding:32px 40px 8px;">
+      <p style="margin:0 0 12px;font-size:15px;color:#334155;">Hi <strong>${esc(data.customerName)}</strong>,</p>
+      <p style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.6;">${esc(data.message)}</p>
+      ${data.note ? `<div style="background:#f8fafc;border-left:4px solid ${brand};border-radius:8px;padding:14px 18px;margin:0 0 20px;"><p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Note from ${sBusiness}</p><p style="margin:0;font-size:14px;color:#334155;line-height:1.5;">${esc(data.note)}</p></div>` : ''}
+    </td></tr>
+    <tr><td style="padding:8px 40px 40px;" align="center">
+      <a href="${data.trackLink}" style="display:inline-block;background:${brand};color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 40px;border-radius:12px;text-transform:uppercase;">Track your order</a>
+    </td></tr>
+    <tr><td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #f1f5f9;text-align:center;">
+      <p style="margin:0;font-size:11px;color:#94a3b8;">Powered by <strong>Morniy</strong></p>
+    </td></tr>
+  </table></td></tr></table>
+</body></html>`;
+
+  return sendBrevoEmail({
+    sender: { name: data.businessName, email: '' },
+    to: [{ email: data.recipientEmail, name: data.customerName }],
+    subject: `${data.headline} — order ${data.orderCode} | ${data.businessName}`,
+    htmlContent: html,
+  });
+};
+
 export const sendPasswordResetEmail = async (data: {
   email: string;
   name: string;
