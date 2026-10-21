@@ -679,11 +679,11 @@ export const handlePaystackWebhook = async (
         currency: string;
         owner?: mongoose.Types.ObjectId;
         updatedAt?: Date;
-        profile?: { logoImage?: string };
+        profile?: { logoImage?: string; accentColor?: string };
       } | null;
     }>(
       'businessId',
-      'name currency owner profile.logoImage updatedAt',
+      'name currency owner profile.logoImage profile.accentColor updatedAt',
     )
     .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email');
   const biz = populated?.businessId;
@@ -716,6 +716,7 @@ export const handlePaystackWebhook = async (
       paidAt: new Date().toISOString(),
       publicLink: `${frontendUrl}/invoice/${populated._id}`,
       logoUrl: logoUrlForEmail(biz),
+      accentColor: biz.profile?.accentColor,
     }).catch(() => {});
   }
 

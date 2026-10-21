@@ -47,6 +47,11 @@ export const logoUrlForEmail = (business: {
 
 const escAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+// Brand colour for email headers; anything that isn't a plain #rrggbb falls
+// back to the given default so a bad value can't break the email's styles.
+export const emailBrandColor = (c: unknown, fallback = '#059669') =>
+  typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c : fallback;
+
 // Logo block for the coloured header of transactional emails.
 export const emailLogoHtml = (logoUrl: string | undefined, businessName: string) =>
   logoUrl

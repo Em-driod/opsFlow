@@ -87,7 +87,7 @@ export const sendReceiptByEmailForBusiness = async (
   const email = emailOverride || receipt.payerEmail;
   if (!email) throw new AppError('No email address provided', 400);
 
-  const business = await Business.findById(businessId).select('name currency profile.logoImage updatedAt').lean();
+  const business = await Business.findById(businessId).select('name currency profile.logoImage profile.accentColor updatedAt').lean();
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
   const publicLink = `${frontendUrl}/receipt/${receipt.publicToken}`;
 
@@ -102,6 +102,7 @@ export const sendReceiptByEmailForBusiness = async (
     date: receipt.date.toISOString(),
     publicLink,
     logoUrl: logoUrlForEmail(business),
+    accentColor: business?.profile?.accentColor,
   }).catch(() => false);
 
   return { emailSent: sent, publicLink };

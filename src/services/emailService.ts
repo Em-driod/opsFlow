@@ -1,4 +1,4 @@
-import { emailLogoHtml } from '../utils/branding.js';
+import { emailLogoHtml, emailBrandColor } from '../utils/branding.js';
 const esc = (str: string | undefined | null): string =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -147,7 +147,9 @@ export const sendReceiptEmail = async (data: {
   paidAt: string;
   publicLink: string;
   logoUrl?: string | undefined;
+  accentColor?: string | undefined;
 }): Promise<boolean> => {
+  const brand = emailBrandColor(data.accentColor);
   const formattedTotal = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.total);
@@ -159,7 +161,7 @@ export const sendReceiptEmail = async (data: {
   const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0fdf4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 16px;"><tr><td align="center">
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-    <tr><td style="background:#10b981;padding:32px 40px;">
+    <tr><td style="background:${brand};padding:32px 40px;">
       ${emailLogoHtml(data.logoUrl, data.businessName)}
       <h1 style="margin:0;font-size:22px;font-weight:900;color:#fff;">Payment Received</h1>
       <p style="margin:6px 0 0;font-size:14px;color:rgba(255,255,255,0.8);">From ${sBusinessName}</p>
@@ -442,7 +444,9 @@ export const sendIssuedReceiptEmail = async (data: {
   date: string;
   publicLink: string;
   logoUrl?: string | undefined;
+  accentColor?: string | undefined;
 }): Promise<boolean> => {
+  const brand = emailBrandColor(data.accentColor);
   const formattedAmount = new Intl.NumberFormat('en-NG', {
     style: 'currency', currency: data.currency || 'NGN', minimumFractionDigits: 0,
   }).format(data.amount);
@@ -456,7 +460,7 @@ export const sendIssuedReceiptEmail = async (data: {
 <body style="margin:0;padding:0;background:#f0fdf4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 16px;"><tr><td align="center">
   <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-    <tr><td style="background:linear-gradient(135deg,#059669,#10b981);padding:40px 40px 32px;">
+    <tr><td style="background:${brand};padding:40px 40px 32px;">
       <table width="100%"><tr>
         <td>${emailLogoHtml(data.logoUrl, data.businessName)}<p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.6);">Receipt from</p>
           <h1 style="margin:0;font-size:24px;font-weight:900;color:#ffffff;">${sBusinessName}</h1></td>
@@ -481,13 +485,13 @@ export const sendIssuedReceiptEmail = async (data: {
       </div>
     </td></tr>
     <tr><td style="padding:24px 40px 0;">
-      <div style="background:linear-gradient(135deg,#059669,#10b981);border-radius:12px;padding:24px;text-align:center;">
+      <div style="background:${brand};border-radius:12px;padding:24px;text-align:center;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,0.7);">Amount Received</p>
         <p style="margin:0;font-size:36px;font-weight:900;color:#ffffff;">${formattedAmount}</p>
       </div>
     </td></tr>
     <tr><td style="padding:32px 40px 40px;" align="center">
-      <a href="${data.publicLink}" style="display:inline-block;background:linear-gradient(135deg,#059669,#10b981);color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;text-transform:uppercase;">
+      <a href="${data.publicLink}" style="display:inline-block;background:${brand};color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:1px;padding:16px 48px;border-radius:12px;text-transform:uppercase;">
         View Receipt
       </a>
       <p style="margin:16px 0 0;font-size:12px;color:#94a3b8;">Or copy: <a href="${data.publicLink}" style="color:#059669;word-break:break-all;">${data.publicLink}</a></p>

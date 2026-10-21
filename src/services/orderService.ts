@@ -344,7 +344,7 @@ export const markOrderPaid = async (
   );
   if (!order) return null;
 
-  const business = await Business.findById(order.businessId).select('name currency owner profile.logoImage updatedAt');
+  const business = await Business.findById(order.businessId).select('name currency owner profile.logoImage profile.accentColor updatedAt');
   const recorder =
     (opts.user?._id as mongoose.Types.ObjectId | undefined) ??
     business?.owner ??
@@ -416,6 +416,7 @@ export const markOrderPaid = async (
       date: paidAt.toISOString(),
       publicLink: `${frontendUrl}/receipt/${receipt.publicToken}`,
       logoUrl: logoUrlForEmail(business),
+      accentColor: business.profile?.accentColor,
     }).catch(() => {});
   }
 
