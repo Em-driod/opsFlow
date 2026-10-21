@@ -176,7 +176,7 @@ export const getPublicProfileBySlug = async (slug: string) => {
   // no showOnProfile in the document at all — still count as visible by default.
   const catalogItems = await Product.find({ businessId: business._id, isActive: true, showOnProfile: { $ne: false } })
     .sort({ name: 1 })
-    .select('name description price image trackStock stock');
+    .select('name description price image trackStock stock category subcategory');
 
   const services = [
     ...catalogItems.map((p) => ({
@@ -186,6 +186,8 @@ export const getPublicProfileBySlug = async (slug: string) => {
       description: p.description,
       price: p.price,
       image: p.image,
+      category: p.category || undefined,
+      subcategory: p.subcategory || undefined,
       inStock: p.trackStock ? p.stock : undefined,
     })),
     ...(business.profile?.services ?? []),

@@ -21,6 +21,11 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
   res.json(product);
 });
 
+export const renameCategory = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw new AppError('Not authorized', 401);
+  res.json(await productService.renameCategoryForBusiness(req.user.businessId, req.body ?? {}));
+});
+
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
   await productService.deleteProductForBusiness(req.params.id!, req.user.businessId);

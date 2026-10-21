@@ -8,6 +8,7 @@ export interface IProduct extends Document {
   costPrice?: number | null;
   unit?: string;
   category?: string;
+  subcategory?: string;
   image?: string;
   isActive: boolean;
   trackStock: boolean;
@@ -26,7 +27,9 @@ const ProductSchema: Schema = new Schema(
     // null = not set yet (distinct from a genuine zero-cost item).
     costPrice: { type: Number, min: 0, default: null, select: false },
     unit: { type: String, default: 'unit' },
-    category: { type: String },
+    category: { type: String, trim: true, maxlength: 60 },
+    // Second level under category, e.g. Drinks → Soft drinks. Optional.
+    subcategory: { type: String, trim: true, maxlength: 60 },
     image: { type: String },
     isActive: { type: Boolean, default: true },
     trackStock: { type: Boolean, default: false },
