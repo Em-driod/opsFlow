@@ -18,6 +18,8 @@ import payrollRoutes from './routes/payrollRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import reportingRoutes from './routes/reportingRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import currencyRoutes from './routes/currencyRoutes.js';
 import scannedTransactionRoutes from './routes/scannedTransactionRoutes.js';
@@ -113,6 +115,7 @@ const startServer = async () => {
     app.use('/api/payrolls/payslip', publicLimiter);
     app.use('/api/clients/portal', publicLimiter);
     app.use('/api/businesses/public', publicLimiter);
+    app.use('/api/orders/public', publicLimiter);
     app.use('/api/users/login', authLimiter);
     app.use('/api/users/register', authLimiter);
 
@@ -141,6 +144,8 @@ const startServer = async () => {
     app.use('/api/budgets', budgetRoutes);
     app.use('/api/search', searchRoutes);
     app.use('/api/receipts', receiptRoutes);
+    app.use('/api/orders', orderRoutes);
+    app.use('/api/payments', paymentRoutes);
 
     /* ── Utility endpoints ── */
     app.get('/', (_req: Request, res: Response) => {

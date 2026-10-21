@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import Product from '../models/Product.js';
 import { AppError } from '../utils/AppError.js';
 import { normaliseLogo, parseLogoDataUrl } from '../utils/branding.js';
+import { isOrderingOpen } from './orderService.js';
 
 export const createBusinessForOwner = async (
   ownerId: mongoose.Types.ObjectId,
@@ -130,6 +131,7 @@ export const getBrandingForBusiness = async (businessId: mongoose.Types.ObjectId
     name: business.name,
     currency: business.currency,
     slug: business.slug ?? null,
+    isPublic: !!business.profile?.isPublic,
     logoImage: business.profile?.logoImage || null,
     accentColor: business.profile?.accentColor || '#6366f1',
     hasBankDetails: !!(business.profile?.accountNumber || business.profile?.accountNumber2),
@@ -178,6 +180,8 @@ export const getPublicProfileBySlug = async (slug: string) => {
 
   const services = [
     ...catalogItems.map((p) => ({
+      // Catalog items can be ordered online; hand-typed services can't.
+      productId: String(p._id),
       name: p.name,
       description: p.description,
       price: p.price,
@@ -192,6 +196,7 @@ export const getPublicProfileBySlug = async (slug: string) => {
     slug: business.slug,
     currency: business.currency,
     profile: publicProfileFields(business.toObject().profile, services),
+    ordering: { enabled: isOrderingOpen(business) },
   };
 };
 

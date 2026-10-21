@@ -12,7 +12,7 @@ declare module 'express-serve-static-core' {
 // Paths whose senders sign the raw body. The signature must be checked against
 // these exact bytes — re-serialising the parsed (and sanitised) JSON can change
 // them and make valid deliveries fail verification.
-const RAW_BODY_PATHS = ['/api/invoices/webhooks/'];
+const RAW_BODY_PATHS = ['/api/invoices/webhooks/', '/api/payments/webhooks/'];
 
 const captureRawBody = (req: IncomingMessage, _res: unknown, buf: Buffer) => {
   const url = (req as IncomingMessage & { originalUrl?: string }).originalUrl ?? req.url ?? '';

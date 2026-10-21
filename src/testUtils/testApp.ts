@@ -12,6 +12,8 @@ import { jsonParser } from '../middleware/bodyParsers.js';
 import receiptRoutes from '../routes/receiptRoutes.js';
 import clientRoutes from '../routes/clientRoutes.js';
 import productRoutes from '../routes/productRoutes.js';
+import orderRoutes from '../routes/orderRoutes.js';
+import paymentRoutes from '../routes/paymentRoutes.js';
 
 export const createTestApp = () => {
   const app = express();
@@ -27,6 +29,8 @@ export const createTestApp = () => {
   app.use('/api/receipts', receiptRoutes);
   app.use('/api/clients', clientRoutes);
   app.use('/api/products', productRoutes);
+  app.use('/api/orders', orderRoutes);
+  app.use('/api/payments', paymentRoutes);
 
   // Minimal routes for exercising the auth middleware directly.
   app.get('/api/test/protected', protect, (req: Request, res: Response) => {

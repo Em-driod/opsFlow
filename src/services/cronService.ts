@@ -6,6 +6,7 @@ import Invoice from '../models/Invoice.js';
 import { writeSummaryRow } from './googleSheetsService.js';
 import { generateDueRecurringInvoices } from './recurringInvoiceService.js';
 import { sendReminderEmail } from './emailService.js';
+import { syncAllLinkedAccounts } from './bankFeedService.js';
 
 /**
  * Scheduled jobs for OpsFlow Automation.
@@ -43,6 +44,12 @@ export const initCronJobs = () => {
 
   cron.schedule(REMINDER_CRON, () => sendInvoiceReminders());
   console.log(`[Cron] Invoice reminders scheduled: "${REMINDER_CRON}"`);
+
+  // Linked bank accounts (Mono): pick up transfers for orders still awaiting
+  // payment, in case a webhook was missed. Only runs when Mono is configured.
+  cron.schedule('*/10 * * * *', () => {
+    syncAllLinkedAccounts().catch((e) => console.error('[Cron] Bank feed sync failed:', e));
+  });
 };
 
 async function runNightlyJob() {
