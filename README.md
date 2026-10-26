@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/Em-driod/opsFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Em-driod/opsFlow/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Node](https://img.shields.io/badge/Node-20-339933?logo=node.js&logoColor=white)
+![Node](https://img.shields.io/badge/Node-24-339933?logo=node.js&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?logo=mongodb&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-174%20passing-brightgreen)
 
