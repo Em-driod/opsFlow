@@ -33,6 +33,10 @@ export interface IBusinessProfile {
 // object wholesale.
 export interface IPaymentSettings {
   ordersEnabled: boolean;
+  // When on, a transfer with no order code is paid against the one open order with
+  // exactly that amount. Off by default: an unrelated transfer of the same sum
+  // would otherwise mark an order paid. When off it is only suggested to the owner.
+  autoMatchByAmount?: boolean;
   // Secret part of the business's alert-forwarding address (pay-<token>@domain).
   alertToken?: string;
   lastAlertAt?: Date;
@@ -81,6 +85,7 @@ const BusinessSchema: Schema = new Schema(
     profileViews: { type: Number, default: 0 },
     payments: {
       ordersEnabled: { type: Boolean, default: false },
+      autoMatchByAmount: { type: Boolean, default: false },
       alertToken: { type: String, index: { unique: true, sparse: true } },
       lastAlertAt: { type: Date },
       forwardingVerification: {

@@ -216,8 +216,20 @@ describe('forwarded bank alerts', () => {
     expect(await Transaction.countDocuments({ businessId: business._id, type: 'income' })).toBe(1);
   });
 
-  it('matches by exact amount when there is no code and only one order has that amount', async () => {
+  it('only suggests an amount-only match by default, leaving the order for the owner to confirm', async () => {
     const { business, rice, oil, token } = await makeShop('A');
+    const placed = await placeOrder(business.slug!, { items: [{ productId: String(rice._id), quantity: 1 }] });
+    await placeOrder(business.slug!, { items: [{ productId: String(oil._id), quantity: 1 }] });
+    const to = await alertAddressFor(token);
+
+    await sendAlert(to, 'Credit Alert', 'Txn Type: CR\nAmt: NGN 5,000.00\nNarration: transfer');
+    expect((await Order.findOne({ code: placed.body.code }))!.status).toBe('pending_payment');
+    expect(await Transaction.countDocuments({ businessId: business._id, type: 'income' })).toBe(0);
+  });
+
+  it('matches by exact amount with no code when the owner has turned that on', async () => {
+    const { business, rice, oil, token } = await makeShop('A');
+    await Business.updateOne({ _id: business._id }, { $set: { 'payments.autoMatchByAmount': true } });
     const placed = await placeOrder(business.slug!, { items: [{ productId: String(rice._id), quantity: 1 }] });
     await placeOrder(business.slug!, { items: [{ productId: String(oil._id), quantity: 1 }] });
     const to = await alertAddressFor(token);

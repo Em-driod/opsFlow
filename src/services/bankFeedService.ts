@@ -111,6 +111,19 @@ export const recordCredit = async (
   }
 
   const byAmount = open.filter((o) => Math.abs(o.total - amount) < 0.01);
+  const autoMatchByAmount = !!(await Business.findById(businessId).select('payments.autoMatchByAmount').lean())?.payments?.autoMatchByAmount;
+  if (byAmount.length === 1 && !autoMatchByAmount) {
+    // No order code, so we can't be sure this transfer is for that order — let the owner confirm.
+    const only = byAmount[0]!;
+    await finish('unmatched', { suggestedOrderId: only._id, note: `Same amount as order ${only.code}, but no order code — confirm it's theirs` });
+    await notifyAdmins(
+      businessId,
+      `A transfer of ${amount} has no order code but equals order ${only.code}. Confirm it in Orders if it's theirs.`,
+      '/orders?tab=payments',
+    );
+    emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'credit' });
+    return { result: 'unmatched', reason: 'amount_needs_confirmation' };
+  }
   if (byAmount.length === 1) {
     const only = byAmount[0]!;
     const paid = await markOrderPaid(only._id as mongoose.Types.ObjectId, {
@@ -204,6 +217,7 @@ export const getPaymentSettings = async (businessId: mongoose.Types.ObjectId) =>
 
   return {
     ordersEnabled: !!p.ordersEnabled,
+    autoMatchByAmount: !!p.autoMatchByAmount,
     storefrontPublic: !!business.profile?.isPublic,
     storefrontSlug: business.slug ?? null,
     hasBankDetails: !!(business.profile?.accountNumber || business.profile?.accountNumber2),
@@ -230,7 +244,7 @@ export const getPaymentSettings = async (businessId: mongoose.Types.ObjectId) =>
   };
 };
 
-export const updatePaymentSettings = async (businessId: mongoose.Types.ObjectId, body: { ordersEnabled?: unknown; regenerateAddress?: unknown }) => {
+export const updatePaymentSettings = async (businessId: mongoose.Types.ObjectId, body: { ordersEnabled?: unknown; autoMatchByAmount?: unknown; regenerateAddress?: unknown }) => {
   const business = await Business.findById(businessId).select('profile.accountNumber profile.accountNumber2 payments');
   if (!business) throw new AppError('Business not found', 404);
   if (typeof body.ordersEnabled === 'boolean') {
@@ -239,6 +253,7 @@ export const updatePaymentSettings = async (businessId: mongoose.Types.ObjectId,
     }
     business.set('payments.ordersEnabled', body.ordersEnabled);
   }
+  if (typeof body.autoMatchByAmount === 'boolean') business.set('payments.autoMatchByAmount', body.autoMatchByAmount);
   if (body.regenerateAddress === true) {
     business.set('payments.alertToken', crypto.randomBytes(6).toString('hex'));
     business.set('payments.forwardingVerification', undefined);

@@ -13,6 +13,7 @@ import { AppError } from '../utils/AppError.js';
 import { isDuplicateKeyError } from '../utils/transaction.js';
 import { escapeRegex } from '../utils/regex.js';
 import { logoUrlForEmail } from '../utils/branding.js';
+import { logger } from '../utils/logger.js';
 import type { IUser } from '../models/User.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -375,7 +376,7 @@ export const advanceOrderStage = async (
         trackLink: `${frontendUrl}/order/${order.publicToken}`,
         logoUrl: logoUrlForEmail(business as never),
         accentColor: business.profile?.accentColor,
-      }).catch(() => {});
+      }).catch((e) => logger.error(`[Order ${order.code}] update email failed:`, e));
     }
   }
 
@@ -536,7 +537,7 @@ export const markOrderPaid = async (
       publicLink: `${frontendUrl}/receipt/${receipt.publicToken}`,
       logoUrl: logoUrlForEmail(business),
       accentColor: business.profile?.accentColor,
-    }).catch(() => {});
+    }).catch((e) => logger.error(`[Order ${order.code}] receipt email failed:`, e));
   }
 
   return order;
