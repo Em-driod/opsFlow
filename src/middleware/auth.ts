@@ -2,6 +2,7 @@
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import User, { type IUser } from '../models/User.js'; // make sure your User model exports the IUser type
+import { logger } from '../utils/logger.js';
 
 // Extend Express Request to include `user`
 declare module 'express-serve-static-core' {
@@ -40,7 +41,8 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
       req.user = user;
       next();
     } catch (error) {
-      console.error(error);
+      // Expired/forged tokens are routine client errors; only log unexpected failures.
+      if (!(error instanceof jwt.JsonWebTokenError)) logger.error(error);
       return res.status(401).json({ message: 'Not authorized, token failed' });
     }
   } else {

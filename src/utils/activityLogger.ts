@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import ActivityLog from '../models/ActivityLog.js';
+import { logger } from './logger.js';
 
 interface LogActivityParams {
   req: Request;
@@ -18,7 +19,7 @@ export const logActivity = async ({
 }: LogActivityParams) => {
   try {
     if (!req.user) {
-      console.warn('Cannot log activity: No authenticated user');
+      logger.warn('Cannot log activity: No authenticated user');
       return;
     }
 
@@ -38,7 +39,7 @@ export const logActivity = async ({
 
     await activityLog.save();
   } catch (error) {
-    console.error('Failed to log activity:', error);
+    logger.error('Failed to log activity:', error);
     // Don't throw error - logging should not break the main functionality
   }
 };

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Notification from '../models/Notification.js';
 import { AppError } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 
 interface CreateNotificationParams {
   businessId: mongoose.Types.ObjectId | string;
@@ -14,7 +15,7 @@ export const createNotification = async ({ businessId, userId, message, link }: 
     const notification = new Notification({ businessId, userId, message, link });
     await notification.save();
   } catch (error) {
-    console.error('Error creating notification:', error);
+    logger.error('Error creating notification:', error);
     // Don't throw error back to the caller, just log it
   }
 };

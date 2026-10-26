@@ -200,7 +200,7 @@ export const parseInvoiceText = (rawText: string): ParsedInvoice | null => {
   const taxAmount = findLabeledAmount(text, ['vat', 'tax']);
   const tax = taxAmount && subtotal ? Math.round((taxAmount / subtotal) * 1000) / 10 : 0;
 
-  const invoiceNumberMatch = text.match(/invoice\s*(?:number|#|no\.?)?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-/]{2,30})/i);
+  const invoiceNumberMatch = text.match(/invoice\s*(?:number|#|no\.?)?\s*[:-]?\s*([A-Za-z0-9][A-Za-z0-9/-]{2,30})/i);
   const invoiceNumber = invoiceNumberMatch?.[1]?.trim() ?? null;
 
   const vendorName = findLabeledText(text, ['vendor', 'from', 'bill\\s*from']) ?? firstMeaningfulLine(text);

@@ -5,6 +5,7 @@ import Client from '../models/Client.js';
 import Invoice from '../models/Invoice.js';
 import { checkAiRateLimit } from './aiRateLimiter.js';
 import { AppError } from '../utils/AppError.js';
+import { logger } from '../utils/logger.js';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -175,7 +176,7 @@ Rules:
   try {
     parsedData = JSON.parse(cleanedJson);
   } catch {
-    console.error('[NLP Service] Failed to parse model output:', textOutput);
+    logger.error('[NLP Service] Failed to parse model output:', textOutput);
     throw new AppError('Failed to extract structured data from command', 422);
   }
 

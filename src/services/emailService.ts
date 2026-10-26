@@ -1,4 +1,5 @@
 import { emailLogoHtml, emailBrandColor } from '../utils/branding.js';
+import { logger } from '../utils/logger.js';
 const esc = (str: string | undefined | null): string =>
   String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -17,7 +18,7 @@ interface BrevoPayload {
 async function sendBrevoEmail(payload: BrevoPayload): Promise<boolean> {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) {
-    console.warn('[Email] BREVO_API_KEY not set — skipping email send.');
+    logger.warn('[Email] BREVO_API_KEY not set — skipping email send.');
     return false;
   }
 
@@ -37,15 +38,15 @@ async function sendBrevoEmail(payload: BrevoPayload): Promise<boolean> {
 
     if (!res.ok) {
       const err = await res.text();
-      console.error('[Email] Brevo error:', err);
+      logger.error('[Email] Brevo error:', err);
       return false;
     }
 
     const result = await res.json() as { messageId?: string };
-    console.log('[Email] Sent via Brevo — messageId:', result.messageId);
+    logger.info('[Email] Sent via Brevo — messageId:', result.messageId);
     return true;
   } catch (err: any) {
-    console.error('[Email] Brevo request failed:', err?.message);
+    logger.error('[Email] Brevo request failed:', err?.message);
     return false;
   }
 }

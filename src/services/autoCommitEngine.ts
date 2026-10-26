@@ -1,4 +1,5 @@
 import AutoCommitRule, { type IAutoCommitRule } from '../models/AutoCommitRule.js';
+import { logger } from '../utils/logger.js';
 
 export interface ParsedItemForRules {
   amount: number;
@@ -75,6 +76,6 @@ export const recordRuleHit = async (ruleId: string) => {
       { $inc: { matchCount: 1 }, $set: { lastMatchedAt: new Date() } },
     );
   } catch (err) {
-    console.error('[AutoCommit] Failed to record rule hit:', err);
+    logger.error('[AutoCommit] Failed to record rule hit:', err);
   }
 };

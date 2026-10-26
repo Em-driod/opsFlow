@@ -3,6 +3,7 @@ import Invoice from '../models/Invoice.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { analyzeCashFlow } from './cashFlowService.js';
 import { checkAiRateLimit } from './aiRateLimiter.js';
+import { logger } from '../utils/logger.js';
 
 interface Scenario {
   title: string;
@@ -117,10 +118,10 @@ export const getBusinessAdvisorStateForBusiness = async (businessId: mongoose.Ty
             scenarioCache.set(cacheKey, { at: Date.now(), scenarios: aiScenarios });
           }
         } catch (e) {
-          console.error('Failed to parse AI Scenarios:', e);
+          logger.error('Failed to parse AI Scenarios:', e);
         }
       } catch (aiError) {
-        console.error('[Gemini] Failed to generate advice:', aiError);
+        logger.error('[Gemini] Failed to generate advice:', aiError);
       }
     }
   }

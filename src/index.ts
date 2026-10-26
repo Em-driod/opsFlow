@@ -42,6 +42,7 @@ import rateLimit from 'express-rate-limit';
 import { sanitizeBody } from './middleware/sanitize.js';
 import { jsonParser, urlencodedParser } from './middleware/bodyParsers.js';
 import { isAllowedOrigin } from './config/origins.js';
+import { logger } from './utils/logger.js';
 
 /* ── CORS: only allow known origins (shared with Socket.IO, see config/origins.ts) ── */
 const corsOptions: cors.CorsOptions = {
@@ -59,7 +60,7 @@ const corsOptions: cors.CorsOptions = {
 const REQUIRED_ENV = ['MONGO_URI', 'JWT_SECRET'];
 const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missingEnv.length > 0) {
-  console.error(`❌ Missing required environment variables: ${missingEnv.join(', ')}`);
+  logger.error(`❌ Missing required environment variables: ${missingEnv.join(', ')}`);
   process.exit(1);
 }
 
@@ -161,16 +162,16 @@ const startServer = async () => {
     });
 
     /* ── Global error handler ── */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     app.use((err: Error & { status?: number; statusCode?: number }, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status ?? err.statusCode ?? 500;
       const message = err.message || 'Internal server error.';
 
       if (process.env.NODE_ENV !== 'production') {
-        console.error(`[ERROR] ${status} — ${message}`, err.stack);
+        logger.error(`[ERROR] ${status} — ${message}`, err.stack);
       } else {
         // In production, only log 5xx to avoid leaking stack traces
-        if (status >= 500) console.error(`[ERROR] ${status} — ${message}`);
+        if (status >= 500) logger.error(`[ERROR] ${status} — ${message}`);
       }
 
       res.status(status).json({ message });
@@ -178,10 +179,10 @@ const startServer = async () => {
 
     const PORT = Number(process.env.PORT) || 5000;
     server.listen(PORT, () => {
-      console.log(`🚀 Morniy API running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);
+      logger.info(`🚀 Morniy API running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    logger.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 };

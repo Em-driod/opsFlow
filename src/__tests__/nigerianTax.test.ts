@@ -4,7 +4,7 @@ import {
   computeCapitalAllowance,
   inferTaxCategory,
   PIT_BANDS,
-} from '../src/services/nigerianTax.js';
+} from '../services/nigerianTax.js';
 
 describe('computePitTax', () => {
   it('returns zero tax for zero or negative income', () => {

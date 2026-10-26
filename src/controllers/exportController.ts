@@ -5,6 +5,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as exportService from '../services/exportService.js';
+import { logger } from '../utils/logger.js';
 
 // @desc   Start Google OAuth2 Consent Flow
 // @route  GET /api/export/google/auth
@@ -35,7 +36,7 @@ export const googleAuthCallback = async (req: Request, res: Response) => {
 
     res.redirect(`${frontendUrl}/#/automation?connected=true`);
   } catch (err) {
-    console.error('OAuth Callback Error:', (err as { response?: { data?: unknown } }).response?.data || (err as Error).message);
+    logger.error('OAuth Callback Error:', (err as { response?: { data?: unknown } }).response?.data || (err as Error).message);
     res.redirect(`${frontendUrl}/#/automation?error=server_error`);
   }
 };

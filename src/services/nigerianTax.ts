@@ -215,7 +215,7 @@ export const computeCapitalAllowance = (asset: AssetForAllowance, taxYear: numbe
   // Prior years: assume initial + (n-1) full annual claims taken.
   const yearsClaimed = taxYear - acquiredYear; // number of annual claims already taken
   const cumulativeBefore = initialAllowance + annualAllowance * yearsClaimed;
-  let twdv = asset.cost - cumulativeBefore;
+  const twdv = asset.cost - cumulativeBefore;
   if (twdv <= 0) return 0;
   return Math.min(twdv, annualAllowance);
 };
