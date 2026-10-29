@@ -8,6 +8,7 @@ import { generateDueRecurringInvoices } from './recurringInvoiceService.js';
 import { sendReminderEmail } from './emailService.js';
 import { syncAllLinkedAccounts } from './bankFeedService.js';
 import { logger } from '../utils/logger.js';
+import { BASE_CURRENCY } from '../utils/currency.js';
 
 /**
  * Scheduled jobs for OpsFlow Automation.
@@ -114,7 +115,7 @@ async function sendInvoiceReminders() {
         businessName: biz?.name || 'OpsFlow Business',
         invoiceNumber: invoice.invoiceNumber,
         total: invoice.total,
-        currency: biz?.currency || 'NGN',
+        currency: BASE_CURRENCY,
         dueDate: invoice.dueDate.toISOString(),
         publicLink: `${frontendUrl}/invoice/${invoice._id}`,
         type,

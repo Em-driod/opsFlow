@@ -19,6 +19,7 @@ import { extractDocumentText } from '../utils/documentExtraction.js';
 import { parseInvoiceText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
 import { logger } from '../utils/logger.js';
+import { BASE_CURRENCY } from '../utils/currency.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Invoice scanning is deliberately hardcoded, not AI-driven: OCR (images) /
@@ -432,7 +433,7 @@ export const sendInvoiceByEmail = async (id: string, user: IUser, email: string)
     clientName,
     recipientEmail: email,
     total: invoice.total,
-    currency: business?.currency || 'USD',
+    currency: BASE_CURRENCY,
     dueDate: invoice.dueDate.toISOString(),
     lineItems: invoice.lineItems.map((li) => ({
       description: li.description,
@@ -713,7 +714,7 @@ export const handlePaystackWebhook = async (
       businessName: biz.name,
       invoiceNumber: populated.invoiceNumber,
       total: populated.total,
-      currency: biz.currency || 'NGN',
+      currency: BASE_CURRENCY,
       paidAt: new Date().toISOString(),
       publicLink: `${frontendUrl}/invoice/${populated._id}`,
       logoUrl: logoUrlForEmail(biz),
