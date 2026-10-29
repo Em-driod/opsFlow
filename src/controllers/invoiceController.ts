@@ -108,7 +108,7 @@ export const sendInvoice = asyncHandler(async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) throw new AppError('Recipient email is required', 400);
 
-  const { sent, publicLink } = await invoiceService.sendInvoiceByEmail(req.params.id!, req.user, email);
+  const { sent, publicLink } = await invoiceService.sendInvoiceByEmail(req.params.id!, req.user, email, req.body.currency);
 
   res.status(200).json({
     message: sent
