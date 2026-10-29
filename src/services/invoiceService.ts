@@ -19,7 +19,7 @@ import { extractDocumentText } from '../utils/documentExtraction.js';
 import { parseInvoiceText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
 import { logger } from '../utils/logger.js';
-import { BASE_CURRENCY } from '../utils/currency.js';
+import { BASE_CURRENCY, resolveEmailCurrency } from '../utils/currency.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Invoice scanning is deliberately hardcoded, not AI-driven: OCR (images) /
@@ -416,7 +416,9 @@ export const getPublicInvoiceById = async (id: string) => {
   return invoice;
 };
 
-export const sendInvoiceByEmail = async (id: string, user: IUser, email: string) => {
+// `currency` is the one the sender has selected in the app; amounts are stored in
+// NGN, so they are converted the same way the screen converts them.
+export const sendInvoiceByEmail = async (id: string, user: IUser, email: string, currency?: unknown) => {
   const invoice = await Invoice.findOne({ _id: id, businessId: user.businessId }).populate<{
     clientId: { name: string; email: string } | null;
   }>('clientId', 'name email');
@@ -427,21 +429,23 @@ export const sendInvoiceByEmail = async (id: string, user: IUser, email: string)
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const publicLink = `${frontendUrl}/invoice/${invoice._id}`;
 
+  const cur = resolveEmailCurrency(currency);
+
   const sent = await sendInvoiceEmail({
     invoiceNumber: invoice.invoiceNumber,
     businessName: business?.name || 'OpsFlow Business',
     clientName,
     recipientEmail: email,
-    total: invoice.total,
-    currency: BASE_CURRENCY,
+    total: cur.convert(invoice.total),
+    currency: cur.code,
     dueDate: invoice.dueDate.toISOString(),
     lineItems: invoice.lineItems.map((li) => ({
       description: li.description,
       quantity: li.quantity,
-      unitPrice: li.unitPrice,
-      total: li.total,
+      unitPrice: cur.convert(li.unitPrice),
+      total: cur.convert(li.total),
     })),
-    subtotal: invoice.subtotal,
+    subtotal: cur.convert(invoice.subtotal),
     tax: invoice.tax,
     notes: invoice.notes,
     publicLink,
