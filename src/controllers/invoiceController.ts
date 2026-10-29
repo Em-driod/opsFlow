@@ -113,7 +113,7 @@ export const sendInvoice = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     message: sent
       ? `Invoice emailed to ${email} successfully`
-      : 'Email delivery failed — check your SMTP settings on the server. Invoice was still marked as sent.',
+      : 'The email could not be sent. The invoice was still marked as sent — try again, or share its link or WhatsApp instead.',
     emailSent: sent,
     publicLink,
   });
