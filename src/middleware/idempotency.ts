@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import IdempotencyKey from '../models/IdempotencyKey.js';
 import { isDuplicateKeyError } from '../utils/transaction.js';
+import { logger } from '../utils/logger.js';
 
 const KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
@@ -58,7 +59,7 @@ export const idempotency = async (req: Request, res: Response, next: NextFunctio
     // Respond only once the outcome is stored, so an immediate retry is
     // guaranteed to find a completed record rather than a pending one.
     persist
-      .catch((err) => console.error('[Idempotency] failed to persist key:', err))
+      .catch((err) => logger.error('[Idempotency] failed to persist key:', err))
       .finally(() => originalJson(body));
     return res;
   };

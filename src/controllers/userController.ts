@@ -3,6 +3,7 @@ import { logActivity } from '../utils/activityLogger.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as userService from '../services/userService.js';
+import { logger } from '../utils/logger.js';
 
 // @desc    Register a new user and business
 // @route   POST /api/users/register
@@ -123,7 +124,7 @@ export const googleAuth = asyncHandler(async (req: Request, res: Response) => {
     const result = await userService.googleAuth(idToken);
     res.json(result);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     throw new AppError('Google authentication failed.', 401);
   }
 });
@@ -145,7 +146,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   try {
     await userService.requestPasswordReset(email);
   } catch (error) {
-    console.error(error);
+    logger.error(error);
     // Fall through — always return 200 so the response never reveals whether the email exists.
   }
   res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });

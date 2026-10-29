@@ -5,6 +5,7 @@ import { generateInvoiceNumber } from './invoiceService.js';
 import { runInTransaction } from '../utils/transaction.js';
 import { AppError } from '../utils/AppError.js';
 import type { IUser } from '../models/User.js';
+import { logger } from '../utils/logger.js';
 
 const computeNextRunDate = (
   frequency: 'weekly' | 'monthly' | 'quarterly' | 'yearly',
@@ -140,13 +141,13 @@ export const generateDueRecurringInvoices = async (): Promise<void> => {
         );
       });
 
-      console.log(`[Cron] Generated recurring invoice ${invoiceNumber} for business ${template.businessId}`);
+      logger.info(`[Cron] Generated recurring invoice ${invoiceNumber} for business ${template.businessId}`);
     } catch (err) {
-      console.error(`[Cron] Failed to generate recurring invoice for template ${template._id}:`, err);
+      logger.error(`[Cron] Failed to generate recurring invoice for template ${template._id}:`, err);
     }
   }
 
   if (due.length > 0) {
-    console.log(`[Cron] Processed ${due.length} recurring invoice templates.`);
+    logger.info(`[Cron] Processed ${due.length} recurring invoice templates.`);
   }
 };

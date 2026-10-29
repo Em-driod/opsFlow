@@ -4,6 +4,7 @@
 
 import crypto from 'crypto';
 import ExportConfig from '../models/ExportConfig.js';
+import { logger } from '../utils/logger.js';
 
 export type WebhookEvent =
   | 'transaction.created'
@@ -19,7 +20,7 @@ interface WebhookPayload {
   event: WebhookEvent;
   timestamp: string;
   businessId: string;
-  data: any;
+  data: unknown;
 }
 
 const MAX_RETRIES = 3;
@@ -43,9 +44,9 @@ async function deliverWebhook(url: string, secret: string | undefined, payload: 
   try {
     const res = await fetch(url, { method: 'POST', headers, body });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    console.log(`[Webhook] ✅ Delivered "${payload.event}" to ${url}`);
+    logger.info(`[Webhook] ✅ Delivered "${payload.event}" to ${url}`);
   } catch (err) {
-    console.warn(`[Webhook] ❌ Attempt ${attempt} failed for ${url}:`, (err as Error).message);
+    logger.warn(`[Webhook] ❌ Attempt ${attempt} failed for ${url}:`, (err as Error).message);
     if (attempt < MAX_RETRIES) {
       const delay = 1000 * attempt * 2; // exponential: 2s, 4s, 6s
       setTimeout(() => deliverWebhook(url, secret, payload, attempt + 1), delay);
@@ -54,7 +55,7 @@ async function deliverWebhook(url: string, secret: string | undefined, payload: 
 }
 
 // Fire an event to all registered webhooks for a business that subscribe to it
-export async function fire(event: WebhookEvent, businessId: string, data: any): Promise<void> {
+export async function fire(event: WebhookEvent, businessId: string, data: unknown): Promise<void> {
   try {
     const config = await ExportConfig.findOne({ businessId });
     if (!config || !config.webhooks?.length) return;
@@ -81,6 +82,6 @@ export async function fire(event: WebhookEvent, businessId: string, data: any): 
       await config.save();
     }
   } catch (err) {
-    console.error('[Webhook] Error firing event:', err);
+    logger.error('[Webhook] Error firing event:', err);
   }
 }

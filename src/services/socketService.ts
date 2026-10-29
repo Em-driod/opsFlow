@@ -3,6 +3,7 @@ import type { Server as HTTPServer } from 'http';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
 import User from '../models/User.js';
 import { isAllowedOrigin } from '../config/origins.js';
+import { logger } from '../utils/logger.js';
 
 let io: SocketIOServer | null = null;
 
@@ -44,30 +45,30 @@ export const initSocketServer = (server: HTTPServer) => {
   });
 
   io.on('connection', (socket) => {
-    console.log(`🔌 Client connected: ${socket.id} (User: ${socket.data.user?.id})`);
+    logger.info(`🔌 Client connected: ${socket.id} (User: ${socket.data.user?.id})`);
 
     // Join a room based on their businessId so they only get their org's events
     const businessId = socket.data.user?.businessId;
     if (businessId) {
       socket.join(String(businessId));
-      console.log(`🏠 Socket ${socket.id} joined room ${businessId}`);
+      logger.info(`🏠 Socket ${socket.id} joined room ${businessId}`);
     }
 
     socket.on('disconnect', () => {
-      console.log(`🔌 Client disconnected: ${socket.id}`);
+      logger.info(`🔌 Client disconnected: ${socket.id}`);
     });
   });
 
-  console.log('[Socket.io] Real-time server initialized.');
+  logger.info('[Socket.io] Real-time server initialized.');
 };
 
 /**
  * Emit an event to a specific business room
  */
-export const emitToBusiness = (businessId: string, eventName: string, payload: any) => {
+export const emitToBusiness = (businessId: string, eventName: string, payload: unknown) => {
   if (io) {
     io.to(businessId).emit(eventName, payload);
   } else {
-    console.warn(`⚠️ Attempted to emit '${eventName}' but Socket.io is not initialized.`);
+    logger.warn(`⚠️ Attempted to emit '${eventName}' but Socket.io is not initialized.`);
   }
 };

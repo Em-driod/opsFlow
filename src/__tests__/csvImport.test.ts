@@ -1,4 +1,4 @@
-import { parseCsv, parseAmount } from '../src/services/csvImport.js';
+import { parseCsv, parseAmount } from '../services/csvImport.js';
 
 describe('parseAmount', () => {
   it('parses US format', () => {

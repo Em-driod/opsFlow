@@ -1,33 +1,26 @@
-import { FlatCompat } from '@eslint/compat';
-import eslintParserTypeScript from '@typescript-eslint/parser';
+import js from '@eslint/js';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+import tsParser from '@typescript-eslint/parser';
+import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 
-const compat = new FlatCompat({
-  baseDirectory: import.meta.url ? new URL('.', import.meta.url).pathname : process.cwd(),
-});
-
 export default [
-  ...compat.extends(
-    'eslint:recommended',
-    'plugin:@typescript-eslint/recommended',
-    'prettier'
-  ),
+  { ignores: ['dist/**', 'node_modules/**'] },
+  js.configs.recommended,
+  ...tsPlugin.configs['flat/recommended'],
+  prettier,
   {
-    files: ['src/**/*.ts'],
-    languageOptions: {
-      parser: eslintParserTypeScript,
-      parserOptions: {
-        ecmaVersion: 2020,
-        sourceType: 'module',
-      },
-      globals: {
-        ...globals.node,
-        ...globals.jest,
-      },
-    },
     rules: {
-      // Add any specific rules here
-      // Example: '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
+    },
+  },
+  {
+    files: ['src/**/*.ts', '__tests__/**/*.ts', 'scripts/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
+      globals: { ...globals.node, ...globals.jest },
     },
   },
 ];

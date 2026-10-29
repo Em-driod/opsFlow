@@ -158,9 +158,9 @@ const parseDate = (raw: string): string | null => {
   if (!Number.isNaN(d.getTime())) return d.toISOString();
   // DD/MM/YYYY or MM/DD/YYYY — ambiguous, prefer ISO output when both day and
   // month are <= 12 by treating as DD/MM (more common globally outside US).
-  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
   if (m) {
-    let [_, a, b, y] = m;
+    const [_, a, b, y] = m;
     let yyyy = parseInt(y!, 10);
     if (yyyy < 100) yyyy += 2000;
     const ai = parseInt(a!, 10);

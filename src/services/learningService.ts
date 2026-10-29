@@ -1,4 +1,5 @@
 import SmartMapping from '../models/SmartMapping.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Normalizes text to extract the core brand/vendor identity
@@ -34,7 +35,7 @@ export const learnTransactionCategory = async (businessId: string, description: 
       { upsert: true, new: true }
     );
   } catch (error) {
-    console.error('[LearningService] Failed to record mapping:', error);
+    logger.error('[LearningService] Failed to record mapping:', error);
   }
 };
 
@@ -77,7 +78,7 @@ export const predictCategory = async (businessId: string, description: string): 
     return bestMatch;
 
   } catch (error) {
-    console.error('[LearningService] Failed to predict category:', error);
+    logger.error('[LearningService] Failed to predict category:', error);
     return null;
   }
 };

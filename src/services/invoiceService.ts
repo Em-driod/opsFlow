@@ -18,6 +18,7 @@ import { runInTransaction, isDuplicateKeyError } from '../utils/transaction.js';
 import { extractDocumentText } from '../utils/documentExtraction.js';
 import { parseInvoiceText } from '../utils/documentParsing.js';
 import type { IUser } from '../models/User.js';
+import { logger } from '../utils/logger.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Invoice scanning is deliberately hardcoded, not AI-driven: OCR (images) /
@@ -621,7 +622,7 @@ export const handlePaystackWebhook = async (
       }
 
       if (data.currency && data.currency.toUpperCase() !== PAYSTACK_CURRENCY) {
-        console.error(`[Paystack] Currency mismatch on ${reference}: got ${data.currency}, expected ${PAYSTACK_CURRENCY}`);
+        logger.error(`[Paystack] Currency mismatch on ${reference}: got ${data.currency}, expected ${PAYSTACK_CURRENCY}`);
         return;
       }
       const business = await Business.findById(invoice.businessId).select('owner').session(session);
@@ -633,7 +634,7 @@ export const handlePaystackWebhook = async (
       // meantime; record what fits and flag any excess for the owner.
       const balance = invoice.balance;
       if (balance <= 0) {
-        console.error(`[Paystack] ${reference}: ${charged} received for already-settled invoice ${invoice.invoiceNumber}`);
+        logger.error(`[Paystack] ${reference}: ${charged} received for already-settled invoice ${invoice.invoiceNumber}`);
         return;
       }
       const amount = Math.min(charged, balance);

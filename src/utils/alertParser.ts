@@ -29,7 +29,7 @@ export const htmlToText = (html: string) =>
     .replace(/&[a-z#0-9]+;/gi, (e) => ENTITIES[e.toLowerCase()] ?? ' ');
 
 const normaliseSpace = (s: string) =>
-  s.replace(/\r/g, '').replace(/[ \t ]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+  s.replace(/\r/g, '').replace(/[ \t\xa0]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
 const MONEY = String.raw`(?:NGN|N|₦|=N=)?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)`;
 
@@ -39,7 +39,7 @@ const toNumber = (s: string) => {
 };
 
 const findDirection = (text: string, subject: string): ParsedAlert['direction'] => {
-  const labelled = /(?:transaction\s*type|txn\s*type|trans(?:action)?\s*type|type|txn)\s*[:\-]?\s*(credit|debit|cr|dr)\b/i.exec(text);
+  const labelled = /(?:transaction\s*type|txn\s*type|trans(?:action)?\s*type|type|txn)\s*[:-]?\s*(credit|debit|cr|dr)\b/i.exec(text);
   if (labelled) return /^c/i.test(labelled[1]!) ? 'credit' : 'debit';
 
   const s = `${subject}\n${text.slice(0, 400)}`;
@@ -70,10 +70,10 @@ const findAmount = (text: string): number | null => {
 };
 
 const findNarration = (text: string): string | null => {
-  const m = /\b(?:narration|narrative|description|remarks?|details|memo|des|desc)\s*[:\-]\s*([^\n]{1,200})/i.exec(text);
+  const m = /\b(?:narration|narrative|description|remarks?|details|memo|des|desc)\s*[:-]\s*([^\n]{1,200})/i.exec(text);
   if (!m) return null;
   // Stop at the next labelled field on the same line, e.g. "... Date: 12/10".
-  return m[1]!.split(/\s+(?:date|time|balance|bal|amount|amt|ref(?:erence)?)\s*[:\-]/i)[0]!.trim() || null;
+  return m[1]!.split(/\s+(?:date|time|balance|bal|amount|amt|ref(?:erence)?)\s*[:-]/i)[0]!.trim() || null;
 };
 
 export const parseBankAlert = (input: { subject?: string; text?: string; html?: string }): ParsedAlert => {

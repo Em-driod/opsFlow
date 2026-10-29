@@ -1,4 +1,4 @@
-import { matchesRule, type ParsedItemForRules } from '../src/services/autoCommitEngine.js';
+import { matchesRule, type ParsedItemForRules } from '../services/autoCommitEngine.js';
 
 const baseRule = {
   enabled: true,

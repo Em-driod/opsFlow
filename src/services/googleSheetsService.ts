@@ -4,6 +4,7 @@
 
 import axios from 'axios';
 import ExportConfig from '../models/ExportConfig.js';
+import { logger } from '../utils/logger.js';
 
 // Tab names — these are auto-created in the sheet
 export const SHEET_TABS = {
@@ -73,7 +74,7 @@ async function getOAuth2AccessToken(businessId: string): Promise<string> {
 
     return accessToken;
   } catch (error: any) {
-    console.error('[Sheets Auth] Token refresh failed:', error.response?.data || error.message);
+    logger.error('[Sheets Auth] Token refresh failed:', error.response?.data || error.message);
     throw new Error('Failed to refresh Google Sheets OAuth token');
   }
 }
@@ -115,7 +116,7 @@ async function sheetsApiCall(businessId: string, method: 'get' | 'post', sheetId
     });
     return response.data;
   } catch (error: any) {
-    console.error(`[Sheets API] ${method.toUpperCase()} ${endpoint} failed:`, error.response?.data || error.message);
+    logger.error(`[Sheets API] ${method.toUpperCase()} ${endpoint} failed:`, error.response?.data || error.message);
     throw error;
   }
 }
@@ -145,7 +146,7 @@ async function ensureTabExists(businessId: string, sheetId: string, tabName: str
     }
   } catch (err: any) {
     if (err.response?.status !== 400) {
-       console.error(`[Sheets] Failed to ensure tab "${tabName}":`, err.message);
+       logger.error(`[Sheets] Failed to ensure tab "${tabName}":`, err.message);
     }
   }
 }

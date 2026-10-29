@@ -1,4 +1,4 @@
-import { checkAiRateLimit, __resetRateLimiterForTests } from '../src/services/aiRateLimiter.js';
+import { checkAiRateLimit, __resetRateLimiterForTests } from '../services/aiRateLimiter.js';
 
 describe('checkAiRateLimit', () => {
   beforeEach(() => {

@@ -12,11 +12,12 @@ import {
   SHEET_TABS,
 } from './googleSheetsService.js';
 import ExportConfig, { type ISyncEvent } from '../models/ExportConfig.js';
+import { logger } from '../utils/logger.js';
 
 interface SyncJob {
   type: 'transaction' | 'client' | 'invoice' | 'payroll';
   action: 'created' | 'updated';
-  data: any;
+  data: { _id?: unknown; [key: string]: unknown };
   businessId: string;
   retries: number;
 }
@@ -103,7 +104,7 @@ async function processJob(job: SyncJob): Promise<void> {
       }, RETRY_DELAY_MS * (job.retries + 1));
     }
   } catch (err) {
-    console.error(`[Queue] Job failed (${job.type} ${job.action}):`, err);
+    logger.error(`[Queue] Job failed (${job.type} ${job.action}):`, err);
     if (job.retries < MAX_RETRIES) {
       setTimeout(() => {
         queue.push({ ...job, retries: job.retries + 1 });

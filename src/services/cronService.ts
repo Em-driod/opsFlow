@@ -7,6 +7,7 @@ import { writeSummaryRow } from './googleSheetsService.js';
 import { generateDueRecurringInvoices } from './recurringInvoiceService.js';
 import { sendReminderEmail } from './emailService.js';
 import { syncAllLinkedAccounts } from './bankFeedService.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Scheduled jobs for OpsFlow Automation.
@@ -22,38 +23,38 @@ const REMINDER_CRON = '0 9 * * *'; // 9am daily
 
 export const initCronJobs = () => {
   if (!cron.validate(NIGHTLY_SUMMARY_CRON)) {
-    console.warn(`[Cron] Invalid NIGHTLY_SUMMARY_CRON expression "${NIGHTLY_SUMMARY_CRON}". Skipping summary job.`);
+    logger.warn(`[Cron] Invalid NIGHTLY_SUMMARY_CRON expression "${NIGHTLY_SUMMARY_CRON}". Skipping summary job.`);
   } else {
     cron.schedule(NIGHTLY_SUMMARY_CRON, runNightlyJob);
-    console.log(`[Cron] Nightly summary scheduled: "${NIGHTLY_SUMMARY_CRON}"`);
+    logger.info(`[Cron] Nightly summary scheduled: "${NIGHTLY_SUMMARY_CRON}"`);
   }
 
   if (!cron.validate(OVERDUE_SWEEP_CRON)) {
-    console.warn(`[Cron] Invalid OVERDUE_SWEEP_CRON expression "${OVERDUE_SWEEP_CRON}". Skipping overdue sweep.`);
+    logger.warn(`[Cron] Invalid OVERDUE_SWEEP_CRON expression "${OVERDUE_SWEEP_CRON}". Skipping overdue sweep.`);
   } else {
     cron.schedule(OVERDUE_SWEEP_CRON, markOverdueInvoices);
-    console.log(`[Cron] Overdue invoice sweep scheduled: "${OVERDUE_SWEEP_CRON}"`);
+    logger.info(`[Cron] Overdue invoice sweep scheduled: "${OVERDUE_SWEEP_CRON}"`);
   }
 
   if (!cron.validate(RECURRING_INVOICE_CRON)) {
-    console.warn(`[Cron] Invalid RECURRING_INVOICE_CRON expression "${RECURRING_INVOICE_CRON}". Skipping recurring invoices job.`);
+    logger.warn(`[Cron] Invalid RECURRING_INVOICE_CRON expression "${RECURRING_INVOICE_CRON}". Skipping recurring invoices job.`);
   } else {
     cron.schedule(RECURRING_INVOICE_CRON, generateDueRecurringInvoices);
-    console.log(`[Cron] Recurring invoices scheduled: "${RECURRING_INVOICE_CRON}"`);
+    logger.info(`[Cron] Recurring invoices scheduled: "${RECURRING_INVOICE_CRON}"`);
   }
 
   cron.schedule(REMINDER_CRON, () => sendInvoiceReminders());
-  console.log(`[Cron] Invoice reminders scheduled: "${REMINDER_CRON}"`);
+  logger.info(`[Cron] Invoice reminders scheduled: "${REMINDER_CRON}"`);
 
   // Linked bank accounts (Mono): pick up transfers for orders still awaiting
   // payment, in case a webhook was missed. Only runs when Mono is configured.
   cron.schedule('*/10 * * * *', () => {
-    syncAllLinkedAccounts().catch((e) => console.error('[Cron] Bank feed sync failed:', e));
+    syncAllLinkedAccounts().catch((e) => logger.error('[Cron] Bank feed sync failed:', e));
   });
 };
 
 async function runNightlyJob() {
-  console.log('[Cron] Running nightly jobs...');
+  logger.info('[Cron] Running nightly jobs...');
   try {
     await markOverdueInvoices();
 
@@ -61,14 +62,14 @@ async function runNightlyJob() {
     for (const config of configs) {
       await processDailySummary(config);
     }
-    console.log(`[Cron] Completed nightly summary for ${configs.length} businesses.`);
+    logger.info(`[Cron] Completed nightly summary for ${configs.length} businesses.`);
   } catch (error) {
-    console.error('[Cron] Error in nightly job:', error);
+    logger.error('[Cron] Error in nightly job:', error);
   }
 }
 
 async function sendInvoiceReminders() {
-  console.log('[Cron] Running invoice reminders...');
+  logger.info('[Cron] Running invoice reminders...');
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
   const now = new Date();
 
@@ -120,9 +121,9 @@ async function sendInvoiceReminders() {
       });
       sent++;
     }
-    console.log(`[Cron] Sent ${sent} invoice reminders.`);
+    logger.info(`[Cron] Sent ${sent} invoice reminders.`);
   } catch (err) {
-    console.error('[Cron] Reminder job failed:', err);
+    logger.error('[Cron] Reminder job failed:', err);
   }
 }
 
@@ -137,10 +138,10 @@ async function markOverdueInvoices() {
       { $set: { status: 'overdue' } },
     );
     if (result.modifiedCount > 0) {
-      console.log(`[Cron] Marked ${result.modifiedCount} invoices as overdue.`);
+      logger.info(`[Cron] Marked ${result.modifiedCount} invoices as overdue.`);
     }
   } catch (error) {
-    console.error('[Cron] Failed to mark overdue invoices:', error);
+    logger.error('[Cron] Failed to mark overdue invoices:', error);
   }
 }
 
@@ -179,6 +180,6 @@ async function processDailySummary(config: any) {
       paidInvoices: invoices.filter((i: any) => i.status === 'paid').length,
     });
   } catch (error) {
-    console.error(`[Cron] Failed to process summary for business ${config.businessId}:`, error);
+    logger.error(`[Cron] Failed to process summary for business ${config.businessId}:`, error);
   }
 }
