@@ -6,6 +6,8 @@ import Order from '../models/Order.js';
 import BankCredit, { type CreditSource } from '../models/BankCredit.js';
 import User from '../models/User.js';
 import { markOrderPaid } from './orderService.js';
+import { recordBankTransferPayment } from './invoiceService.js';
+import Invoice from '../models/Invoice.js';
 import { createNotification } from './notificationService.js';
 import { emitToBusiness } from './socketService.js';
 import { AppError } from '../utils/AppError.js';
@@ -42,15 +44,26 @@ const notifyAdmins = async (businessId: mongoose.Types.ObjectId, message: string
 
 export type CreditOutcome =
   | { result: 'duplicate' }
-  | { result: 'matched'; orderCode: string; matchedBy: 'code' | 'amount' }
+  | { result: 'matched'; kind: 'order' | 'invoice'; ref: string; matchedBy: 'code' | 'amount' }
   | { result: 'unmatched'; reason: string };
 
+const OPEN_INVOICE_STATUSES = ['draft', 'sent', 'partial', 'overdue'];
+
+// Same rule as the Invoice model's `balance` virtual, for lean documents.
+const invoiceBalance = (inv: { total: number; status: string; payments?: { amount: number }[] }) => {
+  const recorded = (inv.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const paid = recorded > 0 ? recorded : inv.status === 'paid' ? inv.total : 0;
+  return Math.max(0, Math.round((inv.total - paid) * 100) / 100);
+};
+
 /**
- * Records one money-in event and, when it clearly belongs to an open order,
- * marks that order paid. Matching rules, strictest first:
- *   1. The order code appears in the alert/narration and the amount covers the
- *      order total → paid.
- *   2. No code, but exactly one open order has exactly this amount → paid.
+ * Records one money-in event and, when it clearly belongs to an open order or
+ * invoice, applies it. Matching rules, strictest first:
+ *   1. An order code is in the narration and the amount covers the order → order paid.
+ *   2. An invoice's payment code (or its number) is in the narration → the
+ *      amount is recorded on that invoice; part payments are fine.
+ *   3. No code, but exactly one open order/invoice is owed exactly this amount
+ *      → suggested to the owner, or applied if they turned on auto-matching.
  * Anything else is kept as an unmatched credit for the owner to match by hand.
  */
 export const recordCredit = async (
@@ -72,76 +85,119 @@ export const recordCredit = async (
     if (isDuplicateKeyError(e)) return { result: 'duplicate' };
     throw e;
   }
+  const creditId = doc._id as mongoose.Types.ObjectId;
+  // The bank event's id is the payment reference on the invoice, so a credit
+  // can only ever be recorded once.
+  const reference = `credit:${creditId}`;
 
   const since = new Date(Date.now() - OPEN_ORDER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const open = await Order.find({ businessId, status: 'pending_payment', createdAt: { $gte: since } })
-    .select('code total')
-    .lean();
+  const [openOrders, invoiceDocs] = await Promise.all([
+    Order.find({ businessId, status: 'pending_payment', createdAt: { $gte: since } }).select('code total').lean(),
+    Invoice.find({ businessId, status: { $in: OPEN_INVOICE_STATUSES } })
+      .select('invoiceNumber paymentCode total status payments')
+      .lean(),
+  ]);
+  const openInvoices = invoiceDocs
+    .map((i) => ({ _id: i._id, invoiceNumber: i.invoiceNumber, paymentCode: i.paymentCode, balance: invoiceBalance(i) }))
+    .filter((i) => i.balance > 0);
 
   const haystack = normaliseForSearch(`${credit.narration ?? ''} ${credit.searchText ?? ''}`);
-  const byCode = open.find((o) => haystack.includes(o.code));
 
   const finish = async (status: 'matched' | 'unmatched', patch: Record<string, unknown>) => {
-    await BankCredit.updateOne({ _id: doc._id }, { $set: { status, ...patch } });
+    await BankCredit.updateOne({ _id: creditId }, { $set: { status, ...patch } });
+  };
+  const refresh = () => {
+    emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'credit' });
+    emitToBusiness(String(businessId), 'data_updated', { type: 'invoice', action: 'credit' });
+  };
+  const applyToInvoice = async (inv: (typeof openInvoices)[number], matchedBy: 'code' | 'amount'): Promise<CreditOutcome | null> => {
+    const r = await recordBankTransferPayment(inv._id as mongoose.Types.ObjectId, { amount, source: credit.source, reference });
+    if (r.outcome !== 'processed') return null;
+    await finish('matched', { invoiceId: inv._id, ...(r.overpaid > 0 ? { note: `Overpaid by ${r.overpaid}` } : {}) });
+    return { result: 'matched', kind: 'invoice', ref: inv.invoiceNumber, matchedBy };
   };
 
-  if (byCode) {
-    if (amount + 0.01 >= byCode.total) {
-      const paid = await markOrderPaid(byCode._id as mongoose.Types.ObjectId, {
+  // 1. Order code
+  const byOrderCode = openOrders.find((o) => haystack.includes(o.code));
+  if (byOrderCode) {
+    if (amount + 0.01 >= byOrderCode.total) {
+      const paid = await markOrderPaid(byOrderCode._id as mongoose.Types.ObjectId, {
         source: credit.source,
         matchedBy: 'code',
         amount,
-        bankCreditId: doc._id as mongoose.Types.ObjectId,
+        bankCreditId: creditId,
         paidAt: credit.receivedAt ?? new Date(),
       });
       if (paid) {
-        await finish('matched', { orderId: byCode._id });
-        return { result: 'matched', orderCode: byCode.code, matchedBy: 'code' };
+        await finish('matched', { orderId: byOrderCode._id });
+        return { result: 'matched', kind: 'order', ref: byOrderCode.code, matchedBy: 'code' };
       }
     } else {
-      await finish('unmatched', { suggestedOrderId: byCode._id, note: `Short payment for ${byCode.code}` });
+      await finish('unmatched', { suggestedOrderId: byOrderCode._id, note: `Short payment for ${byOrderCode.code}` });
       await notifyAdmins(
         businessId,
-        `A transfer of ${amount} mentions order ${byCode.code} but is less than its total (${byCode.total}). Review it in Orders.`,
+        `A transfer of ${amount} mentions order ${byOrderCode.code} but is less than its total (${byOrderCode.total}). Review it in Orders.`,
         '/orders?tab=payments',
       );
-      emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'credit' });
+      refresh();
       return { result: 'unmatched', reason: 'short_payment' };
     }
   }
 
-  const byAmount = open.filter((o) => Math.abs(o.total - amount) < 0.01);
+  // 2. Invoice code (or the invoice number itself)
+  const byInvoiceCode = openInvoices.find(
+    (i) => (i.paymentCode && haystack.includes(i.paymentCode)) || haystack.includes(normaliseForSearch(i.invoiceNumber)),
+  );
+  if (byInvoiceCode) {
+    const matched = await applyToInvoice(byInvoiceCode, 'code');
+    if (matched) return matched;
+  }
+
+  // 3. Amount only
+  const candidates = [
+    ...openOrders.filter((o) => Math.abs(o.total - amount) < 0.01).map((o) => ({ kind: 'order' as const, id: o._id, ref: o.code, order: o })),
+    ...openInvoices.filter((i) => Math.abs(i.balance - amount) < 0.01).map((i) => ({ kind: 'invoice' as const, id: i._id, ref: i.invoiceNumber, invoice: i })),
+  ];
   const autoMatchByAmount = !!(await Business.findById(businessId).select('payments.autoMatchByAmount').lean())?.payments?.autoMatchByAmount;
-  if (byAmount.length === 1 && !autoMatchByAmount) {
-    // No order code, so we can't be sure this transfer is for that order — let the owner confirm.
-    const only = byAmount[0]!;
-    await finish('unmatched', { suggestedOrderId: only._id, note: `Same amount as order ${only.code}, but no order code — confirm it's theirs` });
+
+  if (candidates.length === 1 && !autoMatchByAmount) {
+    // No code, so we can't be sure the transfer is theirs — let the owner confirm.
+    const only = candidates[0]!;
+    await finish('unmatched', {
+      ...(only.kind === 'order' ? { suggestedOrderId: only.id } : { suggestedInvoiceId: only.id }),
+      note: `Same amount as ${only.kind} ${only.ref}, but no code — confirm it's theirs`,
+    });
     await notifyAdmins(
       businessId,
-      `A transfer of ${amount} has no order code but equals order ${only.code}. Confirm it in Orders if it's theirs.`,
+      `A transfer of ${amount} has no code but equals ${only.kind} ${only.ref}. Confirm it in Orders → Unmatched payments if it's theirs.`,
       '/orders?tab=payments',
     );
-    emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'credit' });
+    refresh();
     return { result: 'unmatched', reason: 'amount_needs_confirmation' };
   }
-  if (byAmount.length === 1) {
-    const only = byAmount[0]!;
-    const paid = await markOrderPaid(only._id as mongoose.Types.ObjectId, {
-      source: credit.source,
-      matchedBy: 'amount',
-      amount,
-      bankCreditId: doc._id as mongoose.Types.ObjectId,
-      paidAt: credit.receivedAt ?? new Date(),
-    });
-    if (paid) {
-      await finish('matched', { orderId: only._id });
-      return { result: 'matched', orderCode: only.code, matchedBy: 'amount' };
+  if (candidates.length === 1) {
+    const only = candidates[0]!;
+    if (only.kind === 'invoice') {
+      const matched = await applyToInvoice(only.invoice, 'amount');
+      if (matched) return matched;
+    } else {
+      const paid = await markOrderPaid(only.id as mongoose.Types.ObjectId, {
+        source: credit.source,
+        matchedBy: 'amount',
+        amount,
+        bankCreditId: creditId,
+        paidAt: credit.receivedAt ?? new Date(),
+      });
+      if (paid) {
+        await finish('matched', { orderId: only.id });
+        return { result: 'matched', kind: 'order', ref: only.ref, matchedBy: 'amount' };
+      }
     }
   }
 
-  await finish('unmatched', byAmount.length > 1 ? { note: `${byAmount.length} open orders have this amount` } : {});
-  emitToBusiness(String(businessId), 'data_updated', { type: 'order', action: 'credit' });
-  return { result: 'unmatched', reason: byAmount.length > 1 ? 'ambiguous_amount' : 'no_match' };
+  await finish('unmatched', candidates.length > 1 ? { note: `${candidates.length} open orders/invoices have this amount` } : {});
+  refresh();
+  return { result: 'unmatched', reason: candidates.length > 1 ? 'ambiguous_amount' : 'no_match' };
 };
 
 // ── Owner actions on credits ─────────────────────────────────────────────────
@@ -151,13 +207,52 @@ export const listCredits = async (businessId: mongoose.Types.ObjectId, status?: 
   if (status && ['matched', 'unmatched', 'dismissed'].includes(status)) filter.status = status;
   const credits = await BankCredit.find(filter).sort({ receivedAt: -1 }).limit(100).lean();
   const orderIds = credits.flatMap((c) => [c.orderId, c.suggestedOrderId]).filter(Boolean);
-  const orders = await Order.find({ _id: { $in: orderIds } }).select('code total customer.name status').lean();
-  const byId = new Map(orders.map((o) => [String(o._id), o]));
+  const invoiceIds = credits.flatMap((c) => [c.invoiceId, c.suggestedInvoiceId]).filter(Boolean);
+  const [orders, invoices] = await Promise.all([
+    Order.find({ _id: { $in: orderIds } }).select('code total customer.name status').lean(),
+    Invoice.find({ _id: { $in: invoiceIds } })
+      .select('invoiceNumber total status payments customClientName clientId')
+      .populate<{ clientId: { name?: string } | null }>('clientId', 'name')
+      .lean(),
+  ]);
+  const orderById = new Map(orders.map((o) => [String(o._id), o]));
+  const invoiceById = new Map(
+    invoices.map((i) => [
+      String(i._id),
+      { _id: i._id, invoiceNumber: i.invoiceNumber, total: i.total, balance: invoiceBalance(i), status: i.status, clientName: i.clientId?.name || i.customClientName || '' },
+    ]),
+  );
   return credits.map((c) => ({
     ...c,
-    order: c.orderId ? byId.get(String(c.orderId)) ?? null : null,
-    suggestedOrder: c.suggestedOrderId ? byId.get(String(c.suggestedOrderId)) ?? null : null,
+    order: c.orderId ? orderById.get(String(c.orderId)) ?? null : null,
+    suggestedOrder: c.suggestedOrderId ? orderById.get(String(c.suggestedOrderId)) ?? null : null,
+    invoice: c.invoiceId ? invoiceById.get(String(c.invoiceId)) ?? null : null,
+    suggestedInvoice: c.suggestedInvoiceId ? invoiceById.get(String(c.suggestedInvoiceId)) ?? null : null,
   }));
+};
+
+// The owner says an unmatched transfer was for this invoice — record it there.
+export const matchCreditToInvoice = async (creditId: string, invoiceId: string, user: IUser) => {
+  if (!mongoose.isValidObjectId(creditId) || !mongoose.isValidObjectId(invoiceId)) throw new AppError('Not found', 404);
+  const credit = await BankCredit.findOne({ _id: creditId, businessId: user.businessId });
+  if (!credit) throw new AppError('Payment not found', 404);
+  if (credit.status === 'matched') throw new AppError('This payment is already matched', 400);
+  const invoice = await Invoice.findOne({ _id: invoiceId, businessId: user.businessId }).select('_id status');
+  if (!invoice) throw new AppError('Invoice not found', 404);
+  if (!OPEN_INVOICE_STATUSES.includes(invoice.status)) throw new AppError('That invoice has nothing left to pay', 400);
+
+  const r = await recordBankTransferPayment(invoice._id as mongoose.Types.ObjectId, {
+    amount: credit.amount,
+    source: credit.source,
+    reference: `credit:${credit._id}`,
+    user,
+  });
+  if (r.outcome !== 'processed') throw new AppError('That invoice has nothing left to pay', 400);
+  credit.status = 'matched';
+  credit.invoiceId = invoice._id as mongoose.Types.ObjectId;
+  if (r.overpaid > 0) credit.note = `Overpaid by ${r.overpaid}`;
+  await credit.save();
+  return credit;
 };
 
 export const matchCreditToOrder = async (creditId: string, orderId: string, user: IUser) => {
@@ -367,7 +462,7 @@ export const handleInboundEmail = async (secret: unknown, rawBody: Buffer | unde
         });
         outcome =
           r.result === 'matched'
-            ? `Credit ${parsed.amount} — matched order ${r.orderCode}`
+            ? `Credit ${parsed.amount} — matched ${r.kind} ${r.ref}`
             : r.result === 'duplicate'
               ? 'Already received'
               : `Credit ${parsed.amount} — no matching order`;

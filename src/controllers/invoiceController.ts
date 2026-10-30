@@ -138,6 +138,11 @@ export const getWhatsAppLink = asyncHandler(async (req: Request, res: Response) 
  * @route   POST /api/invoices/:id/pay/init
  * @access  Public
  */
+// POST /api/invoices/public/:id/sent — the client says they've paid by transfer.
+export const markInvoiceSent = asyncHandler(async (req: Request, res: Response) => {
+  res.json(await invoiceService.markInvoiceSentByClient(req.params.id!));
+});
+
 export const initPaystackPayment = asyncHandler(async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) throw new AppError('Email is required', 400);

@@ -19,6 +19,9 @@ export interface IBankCredit extends Document {
   orderId?: mongoose.Types.ObjectId;
   // Set when a code matched but the amount was short — shown as a hint.
   suggestedOrderId?: mongoose.Types.ObjectId;
+  // Invoices are paid by transfer too; a credit can settle (part of) one.
+  invoiceId?: mongoose.Types.ObjectId;
+  suggestedInvoiceId?: mongoose.Types.ObjectId;
   note?: string;
   createdAt: Date;
 }
@@ -34,6 +37,8 @@ const BankCreditSchema = new Schema<IBankCredit>(
     status: { type: String, enum: ['matched', 'unmatched', 'dismissed'], default: 'unmatched' },
     orderId: { type: Schema.Types.ObjectId, ref: 'Order' },
     suggestedOrderId: { type: Schema.Types.ObjectId, ref: 'Order' },
+    invoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice' },
+    suggestedInvoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice' },
     note: { type: String },
   },
   { timestamps: true },

@@ -11,6 +11,7 @@ import {
   sendInvoice,
   getWhatsAppLink,
   initPaystackPayment,
+  markInvoiceSent,
   paystackWebhook,
 } from '../controllers/invoiceController.js';
 import { protect } from '../middleware/auth.js';
@@ -22,6 +23,7 @@ const router = express.Router();
 // Public routes (no auth)
 router.get('/public/:id', getPublicInvoice);
 router.post('/public/:id/pay/init', initPaystackPayment);
+router.post('/public/:id/sent', markInvoiceSent);
 // Signature-verified against the raw body (captured in middleware/bodyParsers.ts)
 router.post('/webhooks/paystack', paystackWebhook);
 
