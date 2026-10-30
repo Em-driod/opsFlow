@@ -91,6 +91,11 @@ export const listCredits = asyncHandler(async (req: Request, res: Response) => {
 // POST /api/payments/credits/:id/match  { orderId }
 export const matchCredit = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw new AppError('Not authorized', 401);
+  // Either an order or an invoice can be picked as the match.
+  if (req.body?.invoiceId) {
+    res.json(await bankFeedService.matchCreditToInvoice(req.params.id!, String(req.body.invoiceId), req.user));
+    return;
+  }
   res.json(await bankFeedService.matchCreditToOrder(req.params.id!, String(req.body?.orderId ?? ''), req.user));
 });
 

@@ -12,6 +12,7 @@ import { fire } from './webhookService.js';
 import { emitToBusiness } from './socketService.js';
 import { sendInvoiceEmail, sendReceiptEmail } from './emailService.js';
 import { AppError } from '../utils/AppError.js';
+import { uniquePaymentCode } from '../utils/paymentCode.js';
 import { logoUrlForEmail } from '../utils/branding.js';
 import { escapeRegex } from '../utils/regex.js';
 import { runInTransaction, isDuplicateKeyError } from '../utils/transaction.js';
@@ -406,6 +407,14 @@ export const voidInvoiceForBusiness = async (id: string, user: IUser) => {
 };
 
 export const getPublicInvoiceById = async (id: string) => {
+  if (!mongoose.isValidObjectId(id)) throw new AppError('Invoice not found', 404);
+  // Invoices created before payment codes existed get one the first time
+  // they're opened, so clients can still reference them in a transfer.
+  const existing = await Invoice.findById(id).select('paymentCode').lean();
+  if (existing && !existing.paymentCode) {
+    const code = await uniquePaymentCode('IV', (c) => Invoice.exists({ paymentCode: c }));
+    await Invoice.updateOne({ _id: id, paymentCode: { $exists: false } }, { $set: { paymentCode: code } });
+  }
   const invoice = await Invoice.findById(id)
     .populate('clientId', 'name email')
     .populate(
@@ -489,7 +498,7 @@ export const getInvoiceWhatsAppLink = async (id: string, user: IUser, phone: str
     `📄 *Invoice:* ${invoice.invoiceNumber}\n` +
     `💰 *Amount Due:* ${formattedAmount}\n` +
     `📅 *Due Date:* ${dueDate}\n\n` +
-    `Click the link below to view your invoice and pay securely online:\n` +
+    `Open the link below to view your invoice and pay by bank transfer:\n` +
     `👉 ${publicLink}\n\n` +
     `Reply to this message if you have any questions.\n\n` +
     `Thank you! 🙏\n*${business?.name || 'us'}*`;
@@ -507,6 +516,13 @@ export const getInvoiceWhatsAppLink = async (id: string, user: IUser, phone: str
 };
 
 export const initPaystackPaymentForInvoice = async (id: string, email: string) => {
+  // The server's Paystack key belongs to the platform, so a card payment here
+  // would be paid to the platform rather than to the business that sent the
+  // invoice. Clients pay by bank transfer straight to the business instead.
+  // Only enable this for a single-business deployment that owns the key.
+  if (process.env.PAYSTACK_INVOICE_PAYMENTS !== 'true') {
+    throw new AppError('Card payment isn’t available for this invoice — please pay by bank transfer using the account details shown.', 410);
+  }
   const invoice = await Invoice.findById(id);
   if (!invoice) throw new AppError('Invoice not found', 404);
   if (invoice.status === 'paid') throw new AppError('Invoice is already paid', 400);
@@ -677,6 +693,18 @@ export const handlePaystackWebhook = async (
   if (outcome !== 'processed') return outcome;
 
   // Side effects only after the commit, so a retried transaction can't notify twice.
+  await afterAutomaticPayment(invoiceId, { via: 'Paystack', willFullyPay, recordedAmount });
+
+  return outcome;
+};
+
+// Tells the owner, refreshes open screens and — once the invoice is settled —
+// emails the client a receipt. Used for payments nobody recorded by hand
+// (Paystack, bank alerts, a linked bank).
+const afterAutomaticPayment = async (
+  invoiceId: mongoose.Types.ObjectId | string,
+  info: { via: string; willFullyPay: boolean; recordedAmount: number },
+) => {
   const populated = await Invoice.findById(invoiceId)
     .populate<{
       businessId: {
@@ -687,21 +715,18 @@ export const handlePaystackWebhook = async (
         updatedAt?: Date;
         profile?: { logoImage?: string; accentColor?: string };
       } | null;
-    }>(
-      'businessId',
-      'name currency owner profile.logoImage profile.accentColor updatedAt',
-    )
+    }>('businessId', 'name currency owner profile.logoImage profile.accentColor updatedAt')
     .populate<{ clientId: { name: string; email: string } | null }>('clientId', 'name email');
   const biz = populated?.businessId;
-  if (!populated || !biz) return outcome;
+  if (!populated || !biz) return;
 
   if (biz.owner) {
     await createNotification({
       businessId: biz._id,
       userId: biz.owner,
-      message: willFullyPay
-        ? `Invoice #${populated.invoiceNumber} fully paid via Paystack — ${recordedAmount} received.`
-        : `${recordedAmount} received via Paystack on Invoice #${populated.invoiceNumber} — ${populated.balance} still owing.`,
+      message: info.willFullyPay
+        ? `Invoice #${populated.invoiceNumber} fully paid via ${info.via} — ${info.recordedAmount} received.`
+        : `${info.recordedAmount} received via ${info.via} on Invoice #${populated.invoiceNumber} — ${populated.balance} still owing.`,
       link: `/invoices/${populated._id}`,
     });
   }
@@ -711,7 +736,7 @@ export const handlePaystackWebhook = async (
   const client = populated.clientId;
   const recipientEmail = client?.email || populated.recipientEmail;
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-  if (recipientEmail && willFullyPay) {
+  if (recipientEmail && info.willFullyPay) {
     sendReceiptEmail({
       recipientEmail,
       clientName: client?.name || 'Valued Client',
@@ -725,6 +750,102 @@ export const handlePaystackWebhook = async (
       accentColor: biz.profile?.accentColor,
     }).catch(() => {});
   }
+};
 
-  return outcome;
+// ─────────────────────────────────────────────────────────────────────────────
+// Bank-transfer payments
+//
+// Clients pay invoices by transfer straight into the business's own account,
+// quoting the invoice's payment code (e.g. "IV3HX9QT"). When a forwarded bank
+// alert or a linked bank shows the money arriving, bankFeedService calls
+// recordBankTransferPayment, which records it exactly like a manual payment —
+// part payments included. The bank event's id is the payment reference, so
+// the same transfer can never be recorded twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type BankPaymentSource = 'email_alert' | 'mono';
+const BANK_METHOD: Record<BankPaymentSource, string> = { email_alert: 'bank_alert', mono: 'bank_feed' };
+const BANK_VIA: Record<BankPaymentSource, string> = { email_alert: 'bank transfer (alert)', mono: 'bank transfer (linked bank)' };
+
+export const recordBankTransferPayment = async (
+  invoiceId: mongoose.Types.ObjectId | string,
+  params: { amount: number; source: BankPaymentSource; reference: string; user?: IUser },
+) => {
+  let outcome = 'ignored' as 'processed' | 'duplicate' | 'ignored';
+  let recordedAmount = 0;
+  let willFullyPay = false;
+  let overpaid = 0;
+
+  try {
+    await runInTransaction(async (session) => {
+      outcome = 'ignored';
+      const invoice = await Invoice.findById(invoiceId).session(session);
+      if (!invoice || invoice.status === 'void') return;
+      if (invoice.payments.some((p) => p.reference === params.reference)) {
+        outcome = 'duplicate';
+        return;
+      }
+      const balance = invoice.balance;
+      if (balance <= 0) return;
+
+      const received = roundMoney(params.amount);
+      const amount = Math.min(received, balance);
+      overpaid = roundMoney(received - amount);
+
+      const business = await Business.findById(invoice.businessId).select('owner').session(session);
+      const recorder =
+        (params.user?._id as mongoose.Types.ObjectId | undefined) ??
+        business?.owner ??
+        ((await User.findOne({ businessId: invoice.businessId, role: 'admin' }).select('_id').session(session))
+          ?._id as mongoose.Types.ObjectId | undefined);
+
+      ({ willFullyPay, amount: recordedAmount } = await applyPaymentToInvoice(
+        invoice,
+        invoice.businessId,
+        recorder,
+        {
+          amount,
+          method: BANK_METHOD[params.source],
+          reference: params.reference,
+          ...(overpaid > 0 ? { note: `Overpaid by ${overpaid} — refund or credit the client` } : {}),
+        },
+        session,
+      ));
+      await invoice.save({ session });
+      outcome = 'processed';
+    });
+  } catch (e) {
+    if (isDuplicateKeyError(e)) return { outcome: 'duplicate' as const, recordedAmount: 0, willFullyPay: false, overpaid: 0 };
+    throw e;
+  }
+
+  if (outcome === 'processed') {
+    await afterAutomaticPayment(invoiceId, { via: BANK_VIA[params.source], willFullyPay, recordedAmount });
+  }
+  return { outcome, recordedAmount, willFullyPay, overpaid };
+};
+
+// "I've sent the money" from the client's invoice page — a nudge for the owner
+// to check their account, not proof of payment.
+export const markInvoiceSentByClient = async (id: string) => {
+  if (!mongoose.isValidObjectId(id)) throw new AppError('Invoice not found', 404);
+  const invoice = await Invoice.findById(id).populate<{ clientId: { name: string } | null }>('clientId', 'name');
+  if (!invoice) throw new AppError('Invoice not found', 404);
+  if (['paid', 'void'].includes(invoice.status) || invoice.customerMarkedPaidAt) return getPublicInvoiceById(id);
+
+  invoice.customerMarkedPaidAt = new Date();
+  await invoice.save();
+
+  const business = await Business.findById(invoice.businessId).select('owner').lean();
+  const who = invoice.clientId?.name || invoice.customClientName || 'Your client';
+  if (business?.owner) {
+    await createNotification({
+      businessId: invoice.businessId,
+      userId: business.owner,
+      message: `${who} says they've paid Invoice #${invoice.invoiceNumber} (${invoice.balance} due, code ${invoice.paymentCode}). Check your account and record the payment.`,
+      link: `/invoices/${invoice._id}`,
+    });
+  }
+  emitToBusiness(String(invoice.businessId), 'data_updated', { type: 'invoice', action: 'updated' });
+  return getPublicInvoiceById(id);
 };

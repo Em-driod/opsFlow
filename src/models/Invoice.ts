@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { snapshotUnitCosts } from '../utils/productCost.js';
+import { uniquePaymentCode } from '../utils/paymentCode.js';
 
 export interface IInvoicePayment {
   amount: number;
@@ -34,6 +35,10 @@ export interface IInvoice extends Document {
   notes?: string;
   transactionId?: mongoose.Types.ObjectId | undefined;
   payments: IInvoicePayment[];
+  // Short code the client puts in their bank transfer, e.g. "IV3HX9QT".
+  paymentCode?: string;
+  // When the client tapped "I've sent the money" — a nudge to check, not proof.
+  customerMarkedPaidAt?: Date;
   // Virtuals (computed, not stored)
   amountPaid: number;
   balance: number;
@@ -78,6 +83,8 @@ const InvoiceSchema: Schema = new Schema(
     notes: { type: String },
     transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
     payments: { type: [InvoicePaymentSchema], default: [] },
+    paymentCode: { type: String, index: { unique: true, sparse: true } },
+    customerMarkedPaidAt: { type: Date },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -105,6 +112,9 @@ InvoiceSchema.pre('save', async function () {
   const invoice = this as unknown as IInvoice;
   if (!invoice.isNew) return;
   await snapshotUnitCosts(invoice.businessId, invoice.lineItems, invoice.$session());
+  if (!invoice.paymentCode) {
+    invoice.paymentCode = await uniquePaymentCode('IV', (code) => mongoose.model('Invoice').exists({ paymentCode: code }));
+  }
 });
 
 export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);
